@@ -7,15 +7,28 @@
 
 $env_params = [];
 
-function read_dotenv($env_filename) {
+function read_dotenv($env_filename, $config_name='main') {
     global $env_params;
+    $env_params[$config_name] = [];
     $handle = fopen($env_filename, "r");
     while ($varname_value = fscanf($handle, "%s\n")) {
-        if ($varname_value[0] == '#') {
+        if ($varname_value[0] == '#' || $varname_value[0] == '') {
+            // Comments are skipped
             continue;
         }
         list ($varname, $value) = explode('=', implode("", $varname_value));
-        $env_params[$varname] = $value;
+        if (substr($varname, 0, 1) == '@') {
+            // It's not an option (environment variable) value, it's a sub-options file,
+            // so the backup can be run for more than one MySQL schema
+            $env_params[$varname] = [];
+            // IMPORTANT: the varname will be the options group, the value will be the 'filename',
+            // and it must have the .env* file fullpath.
+            // Example: @mysql_db_website1=/home/website1/do_bkp_db/.env-prod-website1
+            $env_params[$varname]['filename'] = $value;
+        } else {
+            // Normal option
+            $env_params[$config_name][$varname] = $value;
+        }
     }
     fclose($handle);
 }
@@ -75,38 +88,43 @@ function execute_and_report($f, $cmd)
     return $success;
 }
 
-function get_env($varname) {
+function get_env($varname, $config_name) {
     global $env_params;
-    return (isset($env_params[$varname]) ? $env_params[$varname] : null);
+    if(isset($env_params[$config_name][$varname])) {
+        return $env_params[$config_name][$varname];
+    }
+    return null;
 }
 
-function read_params()
+function read_params($config_name)
 {
     return [
-        "mysql_user" => get_env('MYSQL_USER') ?: '',
-        "mysql_password" => get_env('MYSQL_PASSWORD') ?: '',
-        "mysql_port" => get_env('MYSQL_PORT') ?: '',
-        "mysql_server" => get_env('MYSQL_SERVER'),
-        "mysql_database" => get_env('MYSQL_DATABASE'),
-        "backup_path" => get_env('BACKUP_PATH'),
-        "name_suffix" => get_env('NAME_SUFFIX') ?: '',
-        "log_file_path" => get_env('LOG_FILE_PATH')
+        "mysql_user" => get_env('MYSQL_USER', $config_name) ?: '',
+        "mysql_password" => get_env('MYSQL_PASSWORD', $config_name) ?: '',
+        "mysql_port" => get_env('MYSQL_PORT', $config_name) ?: '',
+        "mysql_server" => get_env('MYSQL_SERVER', $config_name),
+        "mysql_database" => get_env('MYSQL_DATABASE', $config_name),
+        "backup_path" => get_env('BACKUP_PATH', $config_name),
+        "name_suffix" => get_env('NAME_SUFFIX', $config_name) ?: '',
+        "log_file_path" => get_env('LOG_FILE_PATH', $config_name)
     ];
 }
 
-function verify_dir($f, $output_path) {
+function verify_create_folder($f, $output_path, $par) {
     $error = false;
     if (!file_exists($output_path)) {
         try {
-            mkdir($output_path);
+            log_msg($f, "Creating directory: " . $output_path);
+            mkdir($output_path, 0777, true);
         } catch (Exception $e) {
             $error = log_msg(
                 $f,
-                "ERROR: Output directory could not be create:" .
+                "ERROR: Output directory could not be created:" .
                 PHP_EOL . $e->getMessage()
             );
         }
-    } elseif (!is_dir($output_path)) {
+    }
+    if (!is_dir($output_path)) {
         $error = log_msg(
             $f,
             "ERROR: Output directory exists but is not a directory"
@@ -115,9 +133,9 @@ function verify_dir($f, $output_path) {
     return $error;
 }
 
-function perform_backup($f)
+function perform_backup($f, $config_name)
 {
-    $par = read_params();
+    $par = read_params($config_name);
 
     log_msg(
         $f,
@@ -140,8 +158,8 @@ function perform_backup($f)
     }
 
     $output_path = $par["backup_path"] . DIRECTORY_SEPARATOR . $par["mysql_database"];
-    $error = verify_dir($f, $output_path);
-    if ($error) {
+    $error = verify_create_folder($f, $output_path, $par);
+    if ($error !== false) {
         return;
     }
 
@@ -168,12 +186,12 @@ function perform_backup($f)
         $par['mysql_database'],
         '>' . escapeshellarg($dump_filespec)
     ];
-    echo implode(" ", $cmd) . PHP_EOL;
+    $command_ouput = str_replace(
+        $par['mysql_password'], '****', implode(" ", $cmd)
+    );
+    echo $command_ouput . PHP_EOL;
     $result_code = null;
     $cmd_output = system(implode(" ", $cmd), $result_code);
-    // if (!execute_and_report($f, $cmd)) {
-    //     return;
-    // }
 
     if ($result_code == 0) {
         log_msg($f, 'Mysqldump successfully finished at ' . get_formatted_date());
@@ -182,7 +200,7 @@ function perform_backup($f)
             $f,
             'Mysqldump ERROR at ' . get_formatted_date() .
             ' : Result code: ' . $result_code . 
-            ', Error: ' . $cmd_output
+            ', Output: ' . $cmd_output
         );
         return;
     }
@@ -220,7 +238,7 @@ function perform_backup($f)
     return execute_and_report($f, $cmd);
 }
 
-function load_config($params)
+function load_config($params, $config_name='main')
 {
     $config_filespec = $params['config_filename'] ?? '';
     if ($config_filespec && !file_exists($config_filespec)) {
@@ -229,34 +247,45 @@ function load_config($params)
     }
     // $dotenv = new Dotenv();
     // $dotenv->load($config_filespec);
-    read_dotenv($config_filespec);
+    read_dotenv($config_filespec, $config_name);
 }
 
 function main()
 {
+    global $env_params;
     $params = get_command_line_args();
+    // Read the main config file
     load_config($params);
-    $par = read_params();
 
-    if (!$par["mysql_database"]) {
-        echo "ERROR: Database name must be specified" . PHP_EOL;
-        return;
+    foreach ($env_params as $config_name => $config_options) {
+        // For each option group, a backup will be made. There'll be at least the 'main' group.
+        if ($config_name != 'main') {
+            load_config(['config_filename' => $config_options['filename']], $config_name);
+        }
+        // Get environment variable values for this option group
+        $par = read_params($config_name);
+        if (!$par["mysql_database"]) {
+            echo "ERROR: Database name must be specified" . PHP_EOL;
+            return;
+        }
+        // Build the log file fullpath
+        $log_filespec = get_filespec(
+            $par["mysql_database"], $par["name_suffix"], 'log', $par["log_file_path"]
+        );
+        // Try to create directories if not exist
+        $error = verify_create_folder(false, $par["log_file_path"], $par);
+        if ($error !== false) {
+            return;
+        }
+        // It will open a log file for each option group
+        $f = fopen($log_filespec, 'w');
+        // Perform backup
+        perform_backup($f, $config_name);
+        // Close log file
+        log_msg($f, "The Log file is in: {$log_filespec}");
+        log_msg($f, "Process Completed at " . get_formatted_date());
+        fclose($f);
     }
-
-    $log_filespec = get_filespec(
-        $par["mysql_database"], $par["name_suffix"], 'log', $par["log_file_path"]
-    );
-
-    $error = verify_dir(false, $par["log_file_path"]);
-    if ($error) {
-        return;
-    }
-
-    $f = fopen($log_filespec, 'w');
-    perform_backup($f);
-    log_msg($f, "The Log file is in: {$log_filespec}");
-    log_msg($f, "Backup Completed at " . get_formatted_date());
-    fclose($f);
 }
 
 main();

@@ -1,0 +1,38 @@
+# File: docker-compose-portal-al2.yml
+# Directory: portal-dev
+# Portal container in PHP 7.4
+# 2021-10-05 | CR
+#
+version: '3'
+
+services:
+
+  do_bkp_db_app:
+    container_name: do_bkp_db_app
+    image: php:8.0-alpine
+    volumes:
+      - ./:/var/www
+    # Let the container keep running after bring it up
+    tty: true
+    networks:
+      - backend
+    links:
+      - do_bkp_db_mysql
+
+  do_bkp_db_mysql:
+    container_name: do_bkp_db_mysql
+    platform: linux/x86_64
+    image: mysql:5.6
+    environment:
+      MYSQL_DATABASE: test
+      MYSQL_ROOT_PASSWORD: toor
+    expose:
+      - 3306
+    ports:
+      - 33061:3306
+    privileged: true
+    networks:
+      - backend
+
+networks:
+  backend:

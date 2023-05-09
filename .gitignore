@@ -1,4 +1,7 @@
 vendor
 composer.phar
 log
-.env-prod
+backup_db
+.env-prod-*
+.env
+
