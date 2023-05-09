@@ -17,6 +17,16 @@ This project adheres to [Semantic Versioning](http://semver.org/) and [Keep a Ch
 ### Breaks
 
 
+## 0.1.2 (2023-05-09)
+---
+
+### Changes
+do_bkp_db converted to class.
+
+### New
+Web_cron app.
+
+
 ## 0.1.1 (2023-05-08)
 ---
 
