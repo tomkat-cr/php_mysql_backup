@@ -1,7 +1,9 @@
 # !/bin/sh
 # docker-start-point.sh
 # 2023-05-08 | CR
-apk add --update --no-cache mysql-client make zip
+
+apk add --update mysql-client make zip libzip libzip-dev
+docker-php-ext-install mysqli zip pdo_mysql
 
 cd /var/www
 
@@ -31,3 +33,6 @@ NAME_SUFFIX=
 LOG_FILE_PATH=./log
 DEBUG=1
 END
+
+sh scripts/dbseed_run.sh
+

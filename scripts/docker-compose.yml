@@ -1,7 +1,6 @@
-# File: docker-compose-portal-al2.yml
-# Directory: portal-dev
-# Portal container in PHP 7.4
-# 2021-10-05 | CR
+# docker-compose.yml
+# 2023-05-10 | CR
+# Docker container to simulate a mysql server and backup app environment.
 #
 version: '3'
 
@@ -11,7 +10,7 @@ services:
     container_name: do_bkp_db_app
     image: php:8.0-alpine
     volumes:
-      - ./:/var/www
+      - ../:/var/www
     # Let the container keep running after bring it up
     tty: true
     networks:

@@ -10,11 +10,14 @@ class do_bkp_db {
     private $env_params = [];
     private $logfile_handler;
     private $argv;
+    private $global_params;
     private $current_params;
 
-    function __construct($cli_argv) {
+    function __construct($cli_argv, $global_params) {
         $this->argv = $cli_argv;
+        $this->global_params = $global_params;
         // print_r($this->argv);
+        // print_r($this->global_params);
     }
 
     function read_dotenv($env_filename, $config_name='main') {
@@ -70,29 +73,70 @@ class do_bkp_db {
         }
     }
 
-    function log_msg($msg, $return_value = true, $interline = true) {
-        if ($interline) {
-            $this->echo_debug('');
-            if ($this->logfile_handler) {
-                fwrite($this->logfile_handler, PHP_EOL);
-            }
-        }
+    function log_msg($msg) {
         $this->echo_debug($msg);
         if ($this->logfile_handler) {
             fwrite($this->logfile_handler, $msg . PHP_EOL);
         }
-        return $return_value;
     }
 
-    function execute_and_report($cmd) {
+    function log_error($msg) {
+        $this->log_msg($msg);
+        echo 'Error... check log file' . PHP_EOL;
+    }
+
+    function execute_and_report($cmd, $execution_method=null) {
+        if (is_null($execution_method)) {
+            $execution_method = $this->current_params['execution_method'];
+        }
         $success = false;
-        $this->echo_debug(implode(" ", $cmd));
+        $result_code = 0;
+        $output_array = [];
+        $this->log_msg(
+            '[' .
+            $execution_method .
+            '] ' .
+            implode(" ", $cmd)
+        );
         try {
-            $output = shell_exec(implode(" ", $cmd));
-            $this->log_msg($output);
-            $success = true;
-        } catch (Exception $e) {
-            $success = $this->log_msg("ERROR: on command execution... " . $e->getMessage(), false);
+            switch ($execution_method) {
+                case 'system':
+                    $output = system(implode(" ", $cmd), $result_code);
+                    $output_array = [$output];
+                    if ($output === false) {
+                        $result_code = 501;
+                    }
+                    break;
+                case 'exec':
+                    $output = exec(implode(" ", $cmd), $output_array, $result_code);
+                    if ($output === false) {
+                        $result_code = 502;
+                    }
+                    break;
+                case 'shell_exec':
+                default:
+                    // $output = shell_exec($cmd);
+                    $output = shell_exec(implode(" ", $cmd));
+                    $output_array = [$output];
+                    if ($output === false || is_null($output)) {
+                        $result_code = 503;
+                    }
+            }
+            $this->log_msg('Execution completed...');
+            $this->log_msg(implode(PHP_EOL, $output_array));
+            $success = ($result_code == 0);
+            if ($success) {
+                $this->log_msg('Execution successfully finished at ' . $this->get_formatted_date());
+            } else {
+                $this->log_error(
+                    'Execution ERROR at ' . $this->get_formatted_date() .
+                    ' : Result code: ' . $result_code . 
+                    ', Output: ' . $output
+                );
+                return;
+            }
+        } catch (\Exception $e) {
+            $this->log_error("ERROR: on command execution... " . $e->getMessage());
         }
         return $success;
     }
@@ -108,13 +152,15 @@ class do_bkp_db {
         $response = [
             "mysql_user" => $this->get_env('MYSQL_USER', $config_name) ?: '',
             "mysql_password" => $this->get_env('MYSQL_PASSWORD', $config_name) ?: '',
-            "mysql_port" => $this->get_env('MYSQL_PORT', $config_name) ?: '',
+            "mysql_port" => $this->get_env('MYSQL_PORT', $config_name) ?: '3306',
             "mysql_server" => $this->get_env('MYSQL_SERVER', $config_name),
             "mysql_database" => $this->get_env('MYSQL_DATABASE', $config_name),
             "backup_path" => $this->get_env('BACKUP_PATH', $config_name),
             "name_suffix" => $this->get_env('NAME_SUFFIX', $config_name) ?: '',
             "log_file_path" => $this->get_env('LOG_FILE_PATH', $config_name),
             "debug" => $this->get_env('DEBUG', $config_name) ?: '0',
+            "execution_method" => $this->get_env('EXECUTION_METHOD', $config_name) ?:
+                $this->global_params['default_execution_method'],
         ];
         // print_r($response);
         return $response;
@@ -127,18 +173,167 @@ class do_bkp_db {
                 $this->log_msg("Creating directory: " . $output_path);
                 mkdir($output_path, 0777, true);
             } catch (Exception $e) {
-                $error = $this->log_msg(
+                $error = true;
+                $this->log_error(
                     "ERROR: Output directory could not be created:" .
                     PHP_EOL . $e->getMessage()
                 );
             }
         }
         if (!is_dir($output_path)) {
-            $error = $this->log_msg(
+            $error = true;
+            $this->log_error(
                 "ERROR: Output directory exists but is not a directory"
             );
         }
         return $error;
+    }
+
+    function perform_backup_shell_exec($dump_filespec) {
+        $mysql_options = '';
+        if ($this->current_params["mysql_user"]) {
+            $mysql_options = "-h{$this->current_params['mysql_server']}" .
+                " --port {$this->current_params['mysql_port']}" .
+                " -u{$this->current_params['mysql_user']} " .
+                "-p\"{$this->current_params['mysql_password']}\""; 
+        }
+        $cmd = [
+            'mysqldump',
+            $mysql_options,
+            $this->current_params['mysql_database'],
+            '>' . escapeshellarg($dump_filespec)
+        ];
+        $command_ouput = str_replace(
+            $this->current_params['mysql_password'], '****', implode(" ", $cmd)
+        );
+        $this->echo_debug($command_ouput);
+        $success = $this->execute_and_report($cmd, 'system');
+        return $success;
+    }
+
+    function perform_backup_to_sql_file($dump_filespec) {
+
+        // Open the output .sql file
+        try {
+            $sql_file = fopen($dump_filespec, 'w');
+        } catch (\Exception $e) {
+            $this->log_error("ERROR: opening output .SQL file: " . $e->getMessage());
+            return false;
+        }
+
+        // Connect to the database
+        try {
+            $mysqli = new mysqli(
+                $this->current_params['mysql_server'],
+                $this->current_params['mysql_user'],
+                $this->current_params['mysql_password'],
+                $this->current_params['mysql_database'],
+                $this->current_params['mysql_port']
+            );
+        } catch (\Error $e) {
+            $this->log_error("ERROR: opening MySQL database connection: " . $e->getMessage());
+            return false;
+        } catch (\Exception $e) {
+            $this->log_error("EXCEPTION: opening MySQL database connection: " . $e->getMessage());
+            return false;
+        }
+
+        if ($mysqli->connect_error) {
+            $this->log_error("Connection failed: " . $mysqli->connect_error);
+            return false;
+        }
+
+        // Get all tables in the database
+        $tables = [];
+        $result = $mysqli->query("SHOW TABLES");
+        while ($row = $result->fetch_row()) {
+            $tables[] = $row[0];
+        }
+
+        // Generate SQL schema and data
+        foreach ($tables as $table) {
+            $sql = "";
+
+            // Get table creation SQL
+            $result = $mysqli->query("SHOW CREATE TABLE `$table`");
+            $row = $result->fetch_assoc();
+            $sql .= $row['Create Table'] . ';' . PHP_EOL . PHP_EOL;
+
+            // Get table indexes
+            $result = $mysqli->query("SHOW INDEXES FROM `$table`");
+            while ($row = $result->fetch_assoc()) {
+                if ($row['Key_name'] != 'PRIMARY') {
+                    $sql .= "ALTER TABLE `$table` ADD INDEX `{$row['Key_name']}` (`{$row['Column_name']}`);" . PHP_EOL;
+                }
+            }
+            fwrite($sql_file, $sql);
+
+            // Get table data
+            $result = $mysqli->query("SELECT * FROM `$table`");
+            $num_columns = $result->field_count;
+
+            while ($row = $result->fetch_row()) {
+                $sql = "INSERT INTO `$table` VALUES (";
+                for ($i = 0; $i < $num_columns; $i++) {
+                    $sql .= $mysqli->real_escape_string($row[$i]);
+                    if ($i < $num_columns - 1) {
+                        $sql .= ", ";
+                    }
+                }
+                $sql .= ');' . PHP_EOL;
+                fwrite($sql_file, $sql);
+            }
+
+            fwrite($sql_file, PHP_EOL);
+        }
+
+        // Save SQL schema and data to file
+        fclose($sql_file);
+
+        // Close database connection
+        $mysqli->close();
+
+        $this->log_msg("Backup completed successfully. Saved as {$dump_filespec}");
+        return true;
+    }
+
+    function zip_file($zip_filespec, $dump_filespec) {
+        switch($this->current_params['execution_method']) {
+            case 'sql':
+                try {
+                    $zip = new ZipArchive();
+                } catch (\Error $e) {
+                    $this->log_error("ERROR: opening ZipArchive: " . $e->getMessage());
+                    return false;
+                } catch (\Exception $e) {
+                    $this->log_error("EXCEPTION: opening ZipArchive: " . $e->getMessage());
+                    return false;
+                }
+                if ($zip->open($zip_filespec, ZipArchive::CREATE)!==TRUE) {
+                    $this->log_error("ERROR: cannot open <$zip_filespec>");
+                    return false;
+                }
+                if (!$zip->addFile($dump_filespec)) {
+                    $zip->close();
+                    $this->log_error("ERROR: cannot zip .SQL file");
+                    return false;
+                }
+                // echo "numfiles: " . $zip->numFiles . "\n";
+                // echo "status:" . $zip->status . "\n";
+                $zip->close();
+                break;
+            default:
+                $cmd = [
+                    'zip',
+                    '-j',   // -j   junk (don't record) directory names
+                    escapeshellarg($zip_filespec),
+                    escapeshellarg($dump_filespec)
+                ];
+                if (!$this->execute_and_report($cmd)) {
+                    return false;
+                }
+        }
+        return true;
     }
 
     function perform_backup() {
@@ -149,13 +344,16 @@ class do_bkp_db {
 
         $error = false;
         if ($this->current_params["mysql_user"] && !$this->current_params["mysql_password"]) {
-            $error = $this->log_msg("ERROR: Password must be specified when user is not empty");
+            $error = true;
+            $this->log_error("ERROR: Password must be specified when user is not empty");
         }
         if (!$this->current_params["mysql_server"]) {
-            $error = $this->log_msg("ERROR: Server name must be specified");
+            $error = true;
+            $this->log_error("ERROR: Server name must be specified");
         }
         if (!$this->current_params["backup_path"]) {
-            $error = $this->log_msg("ERROR: Backup directory must be specified");
+            $error = true;
+            $this->log_error("ERROR: Backup directory must be specified");
         }
         if ($error) {
             return;
@@ -174,61 +372,30 @@ class do_bkp_db {
             $this->current_params["mysql_database"], $this->current_params["name_suffix"], 'zip', $output_path
         );
 
-        $this->log_msg("Creating Backup: {$dump_filespec}");
+        $this->log_msg("Creating Backup ({$this->current_params['execution_method']}): {$dump_filespec}");
 
-        $mysql_options = '';
-        if ($this->current_params["mysql_user"]) {
-            $mysql_options = "-h{$this->current_params['mysql_server']}" .
-                " --port {$this->current_params['mysql_port']}" .
-                " -u{$this->current_params['mysql_user']} " .
-                "-p\"{$this->current_params['mysql_password']}\""; 
+        switch($this->current_params['execution_method']) {
+            case 'sql':
+                $success = $this->perform_backup_to_sql_file($dump_filespec);
+                break;
+            default:
+                $success = $this->perform_backup_shell_exec($dump_filespec);
         }
-
-        $cmd = [
-            'mysqldump',
-            $mysql_options,
-            $this->current_params['mysql_database'],
-            '>' . escapeshellarg($dump_filespec)
-        ];
-        $command_ouput = str_replace(
-            $this->current_params['mysql_password'], '****', implode(" ", $cmd)
-        );
-        $this->echo_debug($command_ouput);
-        $result_code = null;
-        $cmd_output = system(implode(" ", $cmd), $result_code);
-
-        if ($result_code == 0) {
-            $this->log_msg('Mysqldump successfully finished at ' . $this->get_formatted_date());
-        } else {
-            $this->log_msg(
-                'Mysqldump ERROR at ' . $this->get_formatted_date() .
-                ' : Result code: ' . $result_code . 
-                ', Output: ' . $cmd_output
-            );
+        if (!$success) {
             return;
         }
 
-        $this->log_msg('Zipping File:');    
-        $cmd = [
-            'zip',
-            '-j',   // -j   junk (don't record) directory names
-            escapeshellarg($zip_filespec),
-            escapeshellarg($dump_filespec)
-        ];
-        if (!$this->execute_and_report($cmd)) {
+        $this->log_msg('Zipping File:');
+        if (!$this->zip_file($zip_filespec, $dump_filespec)) {
             return;
         }
-
         $this->log_msg(
             'Zip of mysqldump successfully finished at ' . $this->get_formatted_date()
         );
-        $this->log_msg("Deleting Dump File: {$dump_filespec}");
 
-        $cmd = [
-            'rm',
-            escapeshellarg($dump_filespec)
-        ];
-        if (!$this->execute_and_report($cmd)) {
+        $this->log_msg("Deleting Dump File: {$dump_filespec}");
+        if (!unlink($dump_filespec)) {
+            $this->log_error("ERROR: cannot remove file: $dump_filespec");
             return false;
         }
 
@@ -294,6 +461,14 @@ class do_bkp_db {
     }
 }
 
-$do_bkp_db = new do_bkp_db($argv);
+$global_params = [
+    'process_name' => 'MBI MySQL Backup Utility',
+    'default_execution_method' => 'sql',
+    // 'default_execution_method' => 'exec',
+    // 'default_execution_method' => 'shell_exec',
+    // 'default_execution_method' => 'system',
+];
+
+$do_bkp_db = new do_bkp_db($argv, $global_params);
 $do_bkp_db->main();
 ?>

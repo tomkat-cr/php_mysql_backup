@@ -17,6 +17,13 @@ This project adheres to [Semantic Versioning](http://semver.org/) and [Keep a Ch
 ### Breaks
 
 
+## 0.1.3 (2023-05-10)
+---
+
+### New
+Backup directly to a .SQL file without using shell_exec like phpMyAdmin.
+
+
 ## 0.1.2 (2023-05-09)
 ---
 

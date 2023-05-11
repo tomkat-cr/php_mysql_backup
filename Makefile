@@ -10,7 +10,10 @@ run:
 	sh run.sh
 
 docker:
+	cd scripts
 	docker-compose up
 
 down:
+	cd scripts
 	docker-compose down
+	
