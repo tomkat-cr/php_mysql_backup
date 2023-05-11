@@ -54,7 +54,7 @@ class do_bkp_db {
         return $params;
     }
 
-    function get_formatted_date($to_file_format = false) {
+    function get_formatted_date($to_file_format=false) {
         $date_format = $to_file_format ? "Ymd_His" : "Y-m-d H:i:s";
         return date($date_format);
     }
@@ -135,8 +135,10 @@ class do_bkp_db {
                 );
                 return;
             }
-        } catch (\Exception $e) {
+        } catch (\Error $e) {
             $this->log_error("ERROR: on command execution... " . $e->getMessage());
+        } catch (\Exception $e) {
+            $this->log_error("EXCEPTION: on command execution... " . $e->getMessage());
         }
         return $success;
     }
@@ -336,12 +338,7 @@ class do_bkp_db {
         return true;
     }
 
-    function perform_backup() {
-        $this->log_msg(
-            "Database Backup Started | DB: {$this->current_params['mysql_database']} " .
-            "| Name Suffix: {$this->current_params['name_suffix']} | " . $this->get_formatted_date()
-        );
-
+    function validate_backup_parameters() {
         $error = false;
         if ($this->current_params["mysql_user"] && !$this->current_params["mysql_password"]) {
             $error = true;
@@ -355,6 +352,54 @@ class do_bkp_db {
             $error = true;
             $this->log_error("ERROR: Backup directory must be specified");
         }
+        return $error;
+    }
+
+    function human_readable_filesize($bytes, $dec = 2): string {
+        $size   = array('B', 'kB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB');
+        $factor = floor((strlen($bytes) - 1) / 3);
+        if ($factor == 0) $dec = 0;
+        return sprintf("%.{$dec}f %s", $bytes / (1024 ** $factor), $size[$factor]);
+    }
+
+    function report_backup_location($zip_filespec) {
+        $this->log_msg('The backup is in:');
+
+        // List file(s) using shell...
+        if ($this->current_params['execution_method'] !== 'sql') {
+            $cmd = [
+                'ls -la',
+                escapeshellarg($zip_filespec)
+            ];
+            if (!$this->execute_and_report($cmd)) {
+                return false;
+            }
+            return true;
+        }
+
+        // List file(s) without shell... ordered by file date/time
+        $docs = [];
+        foreach (glob($zip_filespec) as $path) {
+            $docs[$path] = filectime($path);
+        }
+        asort($docs); // sort by value, preserving keys
+        foreach ($docs as $path => $timestamp) {
+            $this->log_msg(
+                $path . ' ' .
+                '| Date: ' . date("Y-m-d H:i:s ", $timestamp) .
+                '| Size: ' . $this->human_readable_filesize(filesize($path))
+            );
+        }
+        return true;
+    }
+
+    function perform_backup() {
+        $this->log_msg(
+            "Database Backup Started | DB: {$this->current_params['mysql_database']} " .
+            "| Name Suffix: {$this->current_params['name_suffix']} | " . $this->get_formatted_date()
+        );
+
+        $error = $this->validate_backup_parameters();
         if ($error) {
             return;
         }
@@ -400,12 +445,9 @@ class do_bkp_db {
         }
 
         $this->log_msg('Backup Completed');
-        $this->log_msg('The backup is in:');
-        $cmd = [
-            'ls -la',
-            escapeshellarg($zip_filespec)
-        ];
-        return $this->execute_and_report($cmd);
+
+        $this->report_backup_location($zip_filespec);
+        return true;
     }
 
     function load_config($params, $config_name='main') {
