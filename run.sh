@@ -29,7 +29,6 @@ if [ "$1" = "clean" ]; then
 fi
 if [[ "$1" = "run" || "$1" = "" ]]; then
     echo "Run..."
-    cd ${APP_DIR}
-    php do_bkp_db.php ${BACKUP_CONFIG_FILENAME}
+    php ${APP_DIR}/do_bkp_db.php ${BACKUP_CONFIG_FILENAME}
     echo "Done..."
 fi

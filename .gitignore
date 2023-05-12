@@ -2,7 +2,9 @@ vendor
 composer.phar
 log
 *.log
+backup_log
 backup_db
+do_bkp_db_backup
+do_bkp_db_log
 .env-prod*
 .env
-

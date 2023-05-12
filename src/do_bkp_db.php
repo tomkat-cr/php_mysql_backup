@@ -8,20 +8,22 @@
 class do_bkp_db {
 
     private $env_params = [];
-    private $logfile_handler;
+    private $logfile_handler = null;
     private $argv;
     private $global_params;
     private $current_params;
+    private $main_debug;
+    private $main_log_file_handler;
 
     function __construct($cli_argv, $global_params) {
         $this->argv = $cli_argv;
         $this->global_params = $global_params;
-        // print_r($this->argv);
-        // print_r($this->global_params);
     }
 
     function read_dotenv($env_filename, $config_name='main') {
-        $this->env_params[$config_name] = [];
+        if (!isset($this->env_params[$config_name])) {
+            $this->env_params[$config_name] = [];
+        }
         $handle = fopen($env_filename, "r");
         while ($varname_value = fscanf($handle, "%s\n")) {
             if ($varname_value[0] == '#' || $varname_value[0] == '') {
@@ -29,6 +31,8 @@ class do_bkp_db {
                 continue;
             }
             list ($varname, $value) = explode('=', implode("", $varname_value));
+            $varname = trim($varname);
+            $value = trim($value);
             if (substr($varname, 0, 1) == '@') {
                 // It's not an option (environment variable) value, it's a sub-options file,
                 // so the backup can be run for more than one MySQL schema
@@ -59,24 +63,35 @@ class do_bkp_db {
         return date($date_format);
     }
 
-    function get_filespec($database_name, $name_suffix, $file_extension, $directory) {
-        $filename = "bkp-db-{$database_name}" .
+    function get_filespec($schema_name, $name_suffix, $file_extension, $directory) {
+        $filename = "bkp-db-{$schema_name}" .
             ($name_suffix ? "-{$name_suffix}" : "") .
             "-" . $this->get_formatted_date(true) .
             ".{$file_extension}";
         return $directory . DIRECTORY_SEPARATOR . $filename;
     }
 
+    function is_debug() {
+        return ($this->main_debug || (isset($this->current_params['debug']) && $this->current_params['debug'] == '1'));
+    }
+
     function echo_debug($msg) {
-        if (!isset($this->current_params['debug']) || $this->current_params['debug'] == '1') {
+        if ($this->is_debug()) {
             echo $msg . PHP_EOL;
         }
     }
 
     function log_msg($msg) {
+        if (is_null($this->logfile_handler)) {
+            $logfile_handler = $this->main_log_file_handler;
+        } else {
+            $logfile_handler = $this->logfile_handler;
+        }
         $this->echo_debug($msg);
-        if ($this->logfile_handler) {
-            fwrite($this->logfile_handler, $msg . PHP_EOL);
+        if ($logfile_handler) {
+            fwrite($logfile_handler, $msg . PHP_EOL);
+        } elseif (!$this->is_debug()) {
+            echo $msg . PHP_EOL;
         }
     }
 
@@ -164,7 +179,6 @@ class do_bkp_db {
             "execution_method" => $this->get_env('EXECUTION_METHOD', $config_name) ?:
                 $this->global_params['default_execution_method'],
         ];
-        // print_r($response);
         return $response;
     }
 
@@ -208,7 +222,8 @@ class do_bkp_db {
         $command_ouput = str_replace(
             $this->current_params['mysql_password'], '****', implode(" ", $cmd)
         );
-        $this->echo_debug($command_ouput);
+        // $this->echo_debug($command_ouput);
+        $this->log_msg($command_ouput);
         $success = $this->execute_and_report($cmd, 'system');
         return $success;
     }
@@ -259,8 +274,6 @@ class do_bkp_db {
             $row = $result->fetch_assoc();
             $sql = $row['Create Table'] . ';' . PHP_EOL . PHP_EOL;
             fwrite($sql_file, $sql);
-
-echo $row['Create Table'] . PHP_EOL;
 
             // Get table indexes (not needed because it's included in the SHOW CREATE TABLE)
             // $result = $mysqli->query("SHOW INDEXES FROM `$table`");
@@ -432,7 +445,7 @@ echo $row['Create Table'] . PHP_EOL;
             return;
         }
 
-        $this->log_msg('Zipping File:');
+        $this->log_msg('Zipping File: ' . $zip_filespec);
         if (!$this->zip_file($zip_filespec, $dump_filespec)) {
             return;
         }
@@ -454,53 +467,115 @@ echo $row['Create Table'] . PHP_EOL;
 
     function load_config($params, $config_name='main') {
         $config_filespec = $params['config_filename'] ?? '';
-        if ($config_filespec && !file_exists($config_filespec)) {
-            $this->echo_debug("ERROR: specified config file {$config_filespec} doesn't exist");
-            return;
+        if (is_null($config_filespec) || $config_filespec == '') {
+            $this->log_error("ERROR: config file must be specified");
+            return false;
         }
-        // $dotenv = new Dotenv();
-        // $dotenv->load($config_filespec);
+        if (!file_exists($config_filespec)) {
+            $this->log_error("ERROR: specified config file {$config_filespec} doesn't exist");
+            return false;
+        }
+        // "read_dotenv" replaces:
+        //   $dotenv = new Dotenv();
+        //   $dotenv->load($config_filespec);
         $this->read_dotenv($config_filespec, $config_name);
+        return true;
+    }
+
+    function prepare_log_handler($schema_name, $name_suffix, $log_file_path) {
+        // Build the log file fullpath
+        $log_filespec = $this->get_filespec(
+            $schema_name, $name_suffix, 'log', $log_file_path
+        );
+        // Try to create directories if not exist
+        $error = $this->verify_create_folder($log_file_path);
+        if ($error == true) {
+            return false;
+        }
+        // It will open a log file for each option group
+        return fopen($log_filespec, 'w');
+    }
+
+    function prepare_main_log_file() {
+        $main_log_file = './do_bkp_db_log';
+        if (isset($this->env_params['main']['LOG_FILE_PATH'])) {
+            $main_log_file = $this->env_params['main']['LOG_FILE_PATH'];
+            unset($this->env_params['main']['LOG_FILE_PATH']);
+        }
+        $this->main_log_file_handler = $this->prepare_log_handler(
+            'main', '', $main_log_file
+        );
+        if($this->main_log_file_handler === false) {
+            throw new Exception('ERROR in do_bkp_db: Cannot open main log file: ');
+        }
+    }
+
+    function prepare_main_debug() {
+        $this->main_debug = null;
+        if (isset($this->env_params['main']['DEBUG'])) {
+            $this->main_debug = $this->env_params['main']['DEBUG'];
+            unset($this->env_params['main']['DEBUG']);
+        }
     }
 
     function main() {
         $params = $this->get_command_line_args();
-        // Read the main config file
-        $this->load_config($params);
 
-        foreach ($this->env_params as $config_name => $config_options) {
+        // Read the main config file
+        if (!$this->load_config($params)) {
+            return;
+        }
+
+        $this->prepare_main_debug();
+        $this->prepare_main_log_file();
+
+        $bkp_groups = array_keys($this->env_params);
+        foreach ($bkp_groups as $config_name) {
+            
             // For each option group, a backup will be made. There'll be at least the 'main' group.
-            $this->echo_debug(PHP_EOL . '>>> Backup Group Name: ' . $config_name);
+            $this->log_msg(PHP_EOL . '>>> Backup Group Name: ' . $config_name);
             if ($config_name != 'main') {
-                $this->load_config(['config_filename' => $config_options['filename']], $config_name);
+                if (!$this->load_config(
+                    ['config_filename' => $this->env_params[$config_name]['filename']],
+                    $config_name
+                )) {
+                    continue;
+                }
             } else {
-                if (empty($config_options)) {
+                if (empty($this->env_params[$config_name])) {
                     continue;
                 }
             }
+
+            // Main debug (if present) takes precedence over all DEBUG settings
+            if (!is_null($this->main_debug)) {
+                $this->env_params[$config_name]['DEBUG'] = $this->main_debug;
+            }
+
             // Get environment variable values for this option group
             $this->current_params = $this->read_params($config_name);
             if (!$this->current_params["mysql_database"]) {
-                $this->echo_debug("ERROR: Database name must be specified");
-                continue;
-            }
-            // Build the log file fullpath
-            $log_filespec = $this->get_filespec(
-                $this->current_params["mysql_database"], $this->current_params["name_suffix"], 'log', $this->current_params["log_file_path"]
-            );
-            // Try to create directories if not exist
-            $error = $this->verify_create_folder($this->current_params["log_file_path"]);
-            if ($error !== false) {
+                $this->log_error("ERROR: Database name must be specified");
                 continue;
             }
             // It will open a log file for each option group
-            $this->logfile_handler = fopen($log_filespec, 'w');
+            $this->logfile_handler = $this->prepare_log_handler(
+                $this->current_params["mysql_database"],
+                $this->current_params["name_suffix"],
+                'log',
+                $this->current_params["log_file_path"]
+            );
+            if ($this->logfile_handler === false) {
+                continue;
+            }
             // Perform backup
+            $this->log_msg(PHP_EOL . '>>> Backup Group Name: ' . $config_name);
             $this->perform_backup($this->current_params);
             // Close log file
             $this->log_msg("The Log file is in: {$log_filespec}");
             $this->log_msg("Process Completed at " . $this->get_formatted_date());
             fclose($this->logfile_handler);
+            $this->logfile_handler = null;
         }
     }
 }

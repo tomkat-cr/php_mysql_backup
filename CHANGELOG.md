@@ -17,6 +17,14 @@ This project adheres to [Semantic Versioning](http://semver.org/) and [Keep a Ch
 ### Breaks
 
 
+## 0.1.4 (2023-05-12)
+---
+
+### New
+Empty value in main .env file validation.
+Main log file.
+
+
 ## 0.1.3 (2023-05-10)
 ---
 

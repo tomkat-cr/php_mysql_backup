@@ -15,14 +15,15 @@ MYSQL_PORT=3306
 MYSQL_SERVER=do_bkp_db_mysql
 MYSQL_DATABASE=test
 NAME_SUFFIX=prod
-BACKUP_PATH=./backup_db
-LOG_FILE_PATH=./log
+BACKUP_PATH=./do_bkp_db_backup
+LOG_FILE_PATH=./do_bkp_db_log
 END
 
 cat > src/.env-prod <<END
 # .env-prod
 @mysql-test-01=./src/.env-prod-docker-mysql
 @mysql-test-02=./src/.env-prod-docker-mysql
+DEBUG=1
 END
 
 cat > web_cron/.env-prod-web-cron <<END
@@ -30,7 +31,7 @@ cat > web_cron/.env-prod-web-cron <<END
 COMMAND="php%20./src/do_bkp_db.php%20./src/.env-prod-docker-mysql"
 NAME=do_bkp_db-docker
 NAME_SUFFIX=
-LOG_FILE_PATH=./log
+LOG_FILE_PATH=./do_bkp_db_log
 DEBUG=1
 END
 
