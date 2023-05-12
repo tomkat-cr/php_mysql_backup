@@ -254,21 +254,23 @@ class do_bkp_db {
 
         // Generate SQL schema and data
         foreach ($tables as $table) {
-            $sql = "";
-
             // Get table creation SQL
             $result = $mysqli->query("SHOW CREATE TABLE `$table`");
             $row = $result->fetch_assoc();
-            $sql .= $row['Create Table'] . ';' . PHP_EOL . PHP_EOL;
-
-            // Get table indexes
-            $result = $mysqli->query("SHOW INDEXES FROM `$table`");
-            while ($row = $result->fetch_assoc()) {
-                if ($row['Key_name'] != 'PRIMARY') {
-                    $sql .= "ALTER TABLE `$table` ADD INDEX `{$row['Key_name']}` (`{$row['Column_name']}`);" . PHP_EOL;
-                }
-            }
+            $sql = $row['Create Table'] . ';' . PHP_EOL . PHP_EOL;
             fwrite($sql_file, $sql);
+
+echo $row['Create Table'] . PHP_EOL;
+
+            // Get table indexes (not needed because it's included in the SHOW CREATE TABLE)
+            // $result = $mysqli->query("SHOW INDEXES FROM `$table`");
+            // $sql = '';
+            // while ($row = $result->fetch_assoc()) {
+            //     if ($row['Key_name'] != 'PRIMARY') {
+            //         $sql .= "ALTER TABLE `$table` ADD INDEX `{$row['Key_name']}` (`{$row['Column_name']}`);" . PHP_EOL;
+            //     }
+            // }
+            // fwrite($sql_file, $sql);
 
             // Get table data
             $result = $mysqli->query("SELECT * FROM `$table`");

@@ -3,6 +3,32 @@
 // 2023-05-10 | CR
 // Populate the mysql test database to have data for do_bkp_bd.php
 
+function read_dotenv($env_filename) {
+    $env_params = [];
+    if (!file_exists($env_filename)) {
+        log_exit('ERROR parameters file not found' . PHP_EOL);
+    }
+    $handle = fopen($env_filename, "r");
+    if ($handle === false) {
+        log_exit('ERROR reading parameters' . PHP_EOL);
+    }
+    while ($varname_value = fscanf($handle, "%s\n")) {
+        if ($varname_value[0] == '#' || $varname_value[0] == '') {
+            // Comments and empty lines are skipped
+            continue;
+        }
+        list ($varname, $value) = explode('=', implode("", $varname_value));
+        $env_params[$varname] = $value;
+    }
+    fclose($handle);
+    return $env_params;
+}
+
+function log_exit($msg) {
+    echo $msg . PHP_EOL;
+    exit();
+}
+
 class DatabaseConnector {
 
     private $dbConnection = null;
@@ -10,7 +36,7 @@ class DatabaseConnector {
 
     public function __construct($env_filename)
     {
-        $this->read_dotenv($env_filename);
+        $this->env_params = read_dotenv($env_filename);
 
         $host = $this->env_params['MYSQL_SERVER'];
         $port = $this->env_params['MYSQL_PORT'];
@@ -33,26 +59,6 @@ class DatabaseConnector {
         }
     }
 
-    function read_dotenv($env_filename) {
-        $this->env_params = [];
-        if (!file_exists($env_filename)) {
-            log_exit('ERROR parameters file not found' . PHP_EOL);
-        }
-        $handle = fopen($env_filename, "r");
-        if ($handle === false) {
-            log_exit('ERROR reading parameters' . PHP_EOL);
-        }
-        while ($varname_value = fscanf($handle, "%s\n")) {
-            if ($varname_value[0] == '#' || $varname_value[0] == '') {
-                // Comments and empty lines are skipped
-                continue;
-            }
-            list ($varname, $value) = explode('=', implode("", $varname_value));
-            $this->env_params[$varname] = $value;
-        }
-        fclose($handle);
-    }
-
     public function getConnection()
     {
         return $this->dbConnection;
@@ -63,12 +69,15 @@ class dbSeed {
 
     private $env_filename;
     private $sql_filename;
+    private $env_params;
 
     public function __construct($env_filename, $sql_filename)
     {
         $this->env_filename = $env_filename;
         $this->sql_filename = $sql_filename;
 
+        $this->env_params = read_dotenv($env_filename);
+    
         print_r([
             'env_filename' => $this->env_filename,
             'sql_filename' => $this->sql_filename,
@@ -82,11 +91,38 @@ class dbSeed {
         } else {
             $statement = $this->default_sql_statement();
         }
+
+        // Truncate
         try {
-            $createTable = $dbConnection->exec($statement);
-            echo "Success!\n";
+            $sql = 
+                "SELECT CONCAT('DROP TABLE ',table_schema,'.',TABLE_NAME, ';') " .
+                "FROM INFORMATION_SCHEMA.TABLES " .
+                "WHERE table_schema = '{$this->env_params['MYSQL_DATABASE']}';";
+            echo PHP_EOL . $sql . PHP_EOL . PHP_EOL;
+            $query_result = $dbConnection->query($sql);
+            $query_result_string = '';
+            foreach ($query_result as $row) {
+                echo $row[0] . PHP_EOL;
+                $query_result_string .= $row[0] . PHP_EOL;
+            }
+            echo PHP_EOL;
+            if (!empty($query_result_string)) {
+                $dbConnection->exec($query_result_string);
+                echo "DROP ALL TABLES: Success!\n";
+            } else {
+                echo "Nothing to DROP...\n";
+            }
+            echo PHP_EOL;
         } catch (\PDOException $e) {
-            log_exit('PDOException: ' . $e->getMessage());
+            log_exit('PDOException running TRUNCATE: ' . $e->getMessage());
+        }
+ 
+        // Restore
+        try {
+            $dbConnection->exec($statement);
+            echo "SQL script: Success!\n";
+        } catch (\PDOException $e) {
+            log_exit('PDOException running the SQL script: ' . $e->getMessage());
         }    
     }
 
@@ -138,11 +174,6 @@ class dbSeed {
         EOS;
         return $statement;
     }
-}
-
-function log_exit($msg) {
-    echo $msg . PHP_EOL;
-    exit();
 }
 
 $config_filename = '.env';
