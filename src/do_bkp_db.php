@@ -11,9 +11,10 @@ class do_bkp_db {
     private $logfile_handler = null;
     private $argv;
     private $global_params;
-    private $current_params;
-    private $main_debug;
-    private $main_log_file_handler;
+    private $current_params = [];
+    private $main_debug = null;
+    private $main_log_file_handler = null;
+    private $log_filespec = '';
 
     function __construct($cli_argv, $global_params) {
         $this->argv = $cli_argv;
@@ -50,12 +51,16 @@ class do_bkp_db {
     }
 
     function get_command_line_args() {
-        $params = [];
-        $params['config_filename'] = '.env';
+        $cli_params = [];
+        $cli_params['config_filename'] = '.env';
         if (count($this->argv) > 1) {
-            $params['config_filename'] = $this->argv[1];
+            $cli_params['config_filename'] = $this->argv[1];
         }
-        return $params;
+        $cli_params['web'] = '0';
+        if (count($this->argv) > 2) {
+            $cli_params['web'] = $this->argv[2];
+        }
+        return $cli_params;
     }
 
     function get_formatted_date($to_file_format=false) {
@@ -71,13 +76,24 @@ class do_bkp_db {
         return $directory . DIRECTORY_SEPARATOR . $filename;
     }
 
+    function is_web() {
+        return (isset($this->global_params['web']) && $this->global_params['web'] == '1');
+    }
+
+    function eol_for_echo() {
+        if ($this->is_web()) {
+            return '<BR/>';
+        }
+        return PHP_EOL;
+    }
+
     function is_debug() {
-        return ($this->main_debug || (isset($this->current_params['debug']) && $this->current_params['debug'] == '1'));
+        return (!is_null($this->main_debug) || (isset($this->current_params['debug']) && $this->current_params['debug'] == '1'));
     }
 
     function echo_debug($msg) {
         if ($this->is_debug()) {
-            echo $msg . PHP_EOL;
+            echo $msg . $this->eol_for_echo();
         }
     }
 
@@ -91,13 +107,13 @@ class do_bkp_db {
         if ($logfile_handler) {
             fwrite($logfile_handler, $msg . PHP_EOL);
         } elseif (!$this->is_debug()) {
-            echo $msg . PHP_EOL;
+            echo $msg . $this->eol_for_echo();
         }
     }
 
     function log_error($msg) {
         $this->log_msg($msg);
-        echo 'Error... check log file' . PHP_EOL;
+        echo 'Error... check log file' . $this->eol_for_echo();
     }
 
     function execute_and_report($cmd, $execution_method=null) {
@@ -167,16 +183,16 @@ class do_bkp_db {
 
     function read_params($config_name) {
         $response = [
-            "mysql_user" => $this->get_env('MYSQL_USER', $config_name) ?: '',
-            "mysql_password" => $this->get_env('MYSQL_PASSWORD', $config_name) ?: '',
+            'mysql_user' => $this->get_env('MYSQL_USER', $config_name) ?: '',
+            'mysql_password' => $this->get_env('MYSQL_PASSWORD', $config_name) ?: '',
             "mysql_port" => $this->get_env('MYSQL_PORT', $config_name) ?: '3306',
-            "mysql_server" => $this->get_env('MYSQL_SERVER', $config_name),
-            "mysql_database" => $this->get_env('MYSQL_DATABASE', $config_name),
-            "backup_path" => $this->get_env('BACKUP_PATH', $config_name),
-            "name_suffix" => $this->get_env('NAME_SUFFIX', $config_name) ?: '',
-            "log_file_path" => $this->get_env('LOG_FILE_PATH', $config_name),
-            "debug" => $this->get_env('DEBUG', $config_name) ?: '0',
-            "execution_method" => $this->get_env('EXECUTION_METHOD', $config_name) ?:
+            'mysql_server' => $this->get_env('MYSQL_SERVER', $config_name),
+            'mysql_database' => $this->get_env('MYSQL_DATABASE', $config_name),
+            'backup_path' => $this->get_env('BACKUP_PATH', $config_name),
+            'name_suffix' => $this->get_env('NAME_SUFFIX', $config_name) ?: '',
+            'log_file_path' => $this->get_env('LOG_FILE_PATH', $config_name),
+            'debug' => $this->get_env('DEBUG', $config_name) ?: '0',
+            'execution_method' => $this->get_env('EXECUTION_METHOD', $config_name) ?:
                 $this->global_params['default_execution_method'],
         ];
         return $response;
@@ -207,7 +223,7 @@ class do_bkp_db {
 
     function perform_backup_shell_exec($dump_filespec) {
         $mysql_options = '';
-        if ($this->current_params["mysql_user"]) {
+        if ($this->current_params['mysql_user']) {
             $mysql_options = "-h{$this->current_params['mysql_server']}" .
                 " --port {$this->current_params['mysql_port']}" .
                 " -u{$this->current_params['mysql_user']} " .
@@ -310,7 +326,8 @@ class do_bkp_db {
         // Close database connection
         $mysqli->close();
 
-        $this->log_msg("Backup completed successfully. Saved as {$dump_filespec}");
+        $this->log_msg('Backup completed successfully at ' . $this->get_formatted_date());
+        $this->log_msg("Saved as {$dump_filespec}");
         return true;
     }
 
@@ -335,8 +352,8 @@ class do_bkp_db {
                     $this->log_error("ERROR: cannot zip .SQL file");
                     return false;
                 }
-                // echo "numfiles: " . $zip->numFiles . "\n";
-                // echo "status:" . $zip->status . "\n";
+                // echo "numfiles: " . $zip->numFiles . $this->eol_for_echo();
+                // echo "status:" . $zip->status . $this->eol_for_echo();
                 $zip->close();
                 break;
             default:
@@ -355,15 +372,15 @@ class do_bkp_db {
 
     function validate_backup_parameters() {
         $error = false;
-        if ($this->current_params["mysql_user"] && !$this->current_params["mysql_password"]) {
+        if ($this->current_params['mysql_user'] && !$this->current_params['mysql_password']) {
             $error = true;
             $this->log_error("ERROR: Password must be specified when user is not empty");
         }
-        if (!$this->current_params["mysql_server"]) {
+        if (!$this->current_params['mysql_server']) {
             $error = true;
             $this->log_error("ERROR: Server name must be specified");
         }
-        if (!$this->current_params["backup_path"]) {
+        if (!$this->current_params['backup_path']) {
             $error = true;
             $this->log_error("ERROR: Backup directory must be specified");
         }
@@ -419,17 +436,17 @@ class do_bkp_db {
             return;
         }
 
-        $output_path = $this->current_params["backup_path"] . DIRECTORY_SEPARATOR . $this->current_params["mysql_database"];
+        $output_path = $this->current_params['backup_path'] . DIRECTORY_SEPARATOR . $this->current_params['mysql_database'];
         $error = $this->verify_create_folder($output_path);
         if ($error !== false) {
             return;
         }
 
         $dump_filespec = $this->get_filespec(
-            $this->current_params["mysql_database"], $this->current_params["name_suffix"], 'sql', $output_path
+            $this->current_params['mysql_database'], $this->current_params['name_suffix'], 'sql', $output_path
         );
         $zip_filespec = $this->get_filespec(
-            $this->current_params["mysql_database"], $this->current_params["name_suffix"], 'zip', $output_path
+            $this->current_params['mysql_database'], $this->current_params['name_suffix'], 'zip', $output_path
         );
 
         $this->log_msg("Creating Backup ({$this->current_params['execution_method']}): {$dump_filespec}");
@@ -484,7 +501,7 @@ class do_bkp_db {
 
     function prepare_log_handler($schema_name, $name_suffix, $log_file_path) {
         // Build the log file fullpath
-        $log_filespec = $this->get_filespec(
+        $this->log_filespec = $this->get_filespec(
             $schema_name, $name_suffix, 'log', $log_file_path
         );
         // Try to create directories if not exist
@@ -493,7 +510,7 @@ class do_bkp_db {
             return false;
         }
         // It will open a log file for each option group
-        return fopen($log_filespec, 'w');
+        return fopen($this->log_filespec, 'w');
     }
 
     function prepare_main_log_file() {
@@ -503,7 +520,9 @@ class do_bkp_db {
             unset($this->env_params['main']['LOG_FILE_PATH']);
         }
         $this->main_log_file_handler = $this->prepare_log_handler(
-            'main', '', $main_log_file
+            'main',
+            '',
+            $main_log_file
         );
         if($this->main_log_file_handler === false) {
             throw new Exception('ERROR in do_bkp_db: Cannot open main log file: ');
@@ -519,10 +538,11 @@ class do_bkp_db {
     }
 
     function main() {
-        $params = $this->get_command_line_args();
-
+        $cli_params = $this->get_command_line_args();
+        $this->global_params['web'] = $cli_params['web'];
+    
         // Read the main config file
-        if (!$this->load_config($params)) {
+        if (!$this->load_config($cli_params)) {
             return;
         }
 
@@ -531,9 +551,11 @@ class do_bkp_db {
 
         $bkp_groups = array_keys($this->env_params);
         foreach ($bkp_groups as $config_name) {
-            
             // For each option group, a backup will be made. There'll be at least the 'main' group.
             $this->log_msg(PHP_EOL . '>>> Backup Group Name: ' . $config_name);
+            if ($this->is_web()) {
+                echo $config_name . $this->eol_for_echo();
+            }
             if ($config_name != 'main') {
                 if (!$this->load_config(
                     ['config_filename' => $this->env_params[$config_name]['filename']],
@@ -543,6 +565,9 @@ class do_bkp_db {
                 }
             } else {
                 if (empty($this->env_params[$config_name])) {
+                    if ($this->is_web()) {
+                        echo $this->eol_for_echo();
+                    }
                     continue;
                 }
             }
@@ -554,16 +579,15 @@ class do_bkp_db {
 
             // Get environment variable values for this option group
             $this->current_params = $this->read_params($config_name);
-            if (!$this->current_params["mysql_database"]) {
+            if (!$this->current_params['mysql_database']) {
                 $this->log_error("ERROR: Database name must be specified");
                 continue;
             }
             // It will open a log file for each option group
             $this->logfile_handler = $this->prepare_log_handler(
-                $this->current_params["mysql_database"],
-                $this->current_params["name_suffix"],
-                'log',
-                $this->current_params["log_file_path"]
+                $this->current_params['mysql_database'],
+                $this->current_params['name_suffix'],
+                $this->current_params['log_file_path']
             );
             if ($this->logfile_handler === false) {
                 continue;
@@ -572,10 +596,19 @@ class do_bkp_db {
             $this->log_msg(PHP_EOL . '>>> Backup Group Name: ' . $config_name);
             $this->perform_backup($this->current_params);
             // Close log file
-            $this->log_msg("The Log file is in: {$log_filespec}");
+            $this->log_msg("The Log file is in: {$this->log_filespec}");
             $this->log_msg("Process Completed at " . $this->get_formatted_date());
             fclose($this->logfile_handler);
+  
+            // Re-init this group's variables
             $this->logfile_handler = null;
+            $this->log_filespec = '';
+            $this->current_params = [];
+
+            // Newline if it was called from the web
+            if ($this->is_web()) {
+                echo $this->eol_for_echo();
+            }
         }
     }
 }

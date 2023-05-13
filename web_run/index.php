@@ -1,8 +1,9 @@
 <?php
-// web_cron/index.php
+// web_run/index.php
 // 2023-05-09 | CR
+// To run the do_bkp_db from a Browser
 
-class web_cron {
+class web_run {
 
     private $env_params = [];
     private $logfile_handler;
@@ -11,7 +12,6 @@ class web_cron {
 
     function __construct($params) {
         $this->global_params = $params;
-        // print_r($this->global_params);
     }
 
     function read_dotenv($env_filename, $config_name='main') {
@@ -29,7 +29,7 @@ class web_cron {
                 $this->env_params[$varname] = [];
                 // IMPORTANT: the varname will be the options group, the value will be the 'filename',
                 // and it must have the .env* file fullpath.
-                // Example: @mysql_db_website1=/home/website1/web_cron/.env-prod-website1
+                // Example: @mysql_db_website1=/home/website1/web_run/.env-prod-website1
                 $this->env_params[$varname]['filename'] = $value;
             } else {
                 // Normal option
@@ -45,7 +45,7 @@ class web_cron {
     }
 
     function get_filespec($name, $name_suffix, $file_extension, $directory) {
-        $filename = "cronjob-{$name}" .
+        $filename = "web_run-{$name}" .
             ($name_suffix ? "-{$name_suffix}" : "") .
             "-" . $this->get_formatted_date(true) .
             ".{$file_extension}";
@@ -84,6 +84,25 @@ class web_cron {
         );
         try {
             switch ($this->global_params['execution_method']) {
+                case 'include':
+                    // For a configuration like:
+                    // COMMAND="php%20./src/do_bkp_db.php%20./src/.env-prod-docker-mysql"
+                    // $cmd is:
+                    // Array("php", "./src/do_bkp_db.php" "./src/.env-prod-docker-mysql")
+                    $argv[0] = $cmd[1]; // command name
+                    $argv[1] = $cmd[2]; // .env configuration file
+                    $argv[2] = '1'; // "web" parameter, to send a <BR/> at the end of each backup group run
+                    if (!file_exists($cmd[1])) {
+                        $result_code = 601;
+                        $output = 'ERROR: file not found: ' . $cmd[1];
+                    } elseif (!file_exists($cmd[2])) {
+                        $result_code = 602;
+                        $output = 'ERROR: file not found: ' . $cmd[2];
+                    } else {
+                        // Execute the PHP program incluuding its main file.
+                        include $cmd[1];
+                    }
+                    break;
                 case 'system':
                     $output = system(implode(" ", $cmd), $result_code);
                     $output_array = [$output];
@@ -139,7 +158,6 @@ class web_cron {
             "log_file_path" => $this->get_env('LOG_FILE_PATH', $config_name) ?: './',
             "debug" => $this->get_env('DEBUG', $config_name) ?: '0',
         ];
-        // print_r($response);
         return $response;
     }
 
@@ -183,14 +201,16 @@ class web_cron {
     function load_config($params, $config_name='main') {
         $config_filespec = $params['config_filename'] ?? '';
         if ($config_filespec && !file_exists($config_filespec)) {
-            $this->echo_debug("ERROR: specified config file {$config_filespec} doesn't exist");
+            $this->echo_debug("ERROR: specified config file '{$config_filespec}' doesn't exist");
             return;
         }
         $this->read_dotenv($config_filespec, $config_name);
     }
 
     function main() {
-        echo 'Process '.$this->global_params['process_name'].' started...<BR/>';
+        echo 'Process ' . $this->global_params['process_name'] .
+             ' started at ' . $this->get_formatted_date() .
+             '<BR/><BR/>';
         // Read the main config file
         $this->load_config($this->global_params);
 
@@ -232,17 +252,24 @@ class web_cron {
             $this->log_msg("Process Completed at " . $this->get_formatted_date());
             fclose($this->logfile_handler);
         }
-        echo 'Process '.$this->global_params['process_name'].' completed...<BR/>';
+        echo '<BR/>Process ' . $this->global_params['process_name'] .
+             ' completed at ' . $this->get_formatted_date() .
+             '<BR/>';
     }
 }
 
+$execution_method = 'include';
+// $execution_method = 'exec';
+// $execution_method = 'shell_exec';
+// $execution_method = 'system';
+if (isset($_GET['em'])) {
+    $execution_method = $_GET['em'];
+}
 $params = [
-    'process_name' => 'MBI-CRN',
-    'config_filename' => __DIR__.'/.env-prod-web-cron',
-    'execution_method' => 'exec',
-    // 'execution_method' => 'shell_exec',
-    // 'execution_method' => 'system',
+    'process_name' => 'MBI-WR',
+    'config_filename' => __DIR__.'/.env-prod-web-run',
+    'execution_method' => $execution_method,
 ];
-$web_cron = new web_cron($params);
-$web_cron->main();
+$web_run = new web_run($params);
+$web_run->main();
 ?>

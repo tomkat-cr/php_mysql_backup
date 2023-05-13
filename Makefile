@@ -7,13 +7,20 @@ help:
 	cat Makefile
 
 run:
-	sh run.sh
+	sh run.sh run $1
 
-docker:
-	cd scripts
-	docker-compose up
+docker: up
+
+up:
+	sh run.sh up
 
 down:
-	cd scripts
-	docker-compose down
+	sh run.sh down
+
+exec:
+	sh run.sh exec
+
+remove:
+	sh run.sh remove
+
 	

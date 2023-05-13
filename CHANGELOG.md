@@ -17,6 +17,19 @@ This project adheres to [Semantic Versioning](http://semver.org/) and [Keep a Ch
 ### Breaks
 
 
+## 0.1.5 (2023-05-13)
+---
+
+### Changes
+"web_cron" app has been renamed to "web_run".
+"web_run" new execution method 'include' to run the do_bkp_db as a PHP include, enabling to run in shared hosting environments where shell() is disabled.
+Makefile use only run.sh, so run.sh performs all the docker operations.
+Error trapping was added to docker-start-point.sh.
+do_bkp_db: $log_filespec converted to a class property to be reported appropiately in the output log file.
+do_bkp_db: double quotes changed to single quotes in all parameters entry names.
+do_bkp_db: the 2nd CLI parameter is now web=1/0 to handle calls from "web_run" and do some echo() of the backup groups processed.
+
+
 ## 0.1.4 (2023-05-12)
 ---
 
