@@ -12,6 +12,7 @@ class web_run {
 
     function __construct($params) {
         $this->global_params = $params;
+        ini_set('max_execution_time', 60*5);
     }
 
     function read_dotenv($env_filename, $config_name='main') {

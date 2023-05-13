@@ -5,7 +5,29 @@
 // require_once '../vendor/autoload.php';
 // use Symfony\Component\Dotenv\Dotenv;
 
-class do_bkp_db {
+class Zipper extends ZipArchive {
+    // Extension to ZipArchive that handles directories recursively
+    public function addDir($path) {
+        if (!$this->addEmptyDir($path)) {
+            return false;
+        }
+        $nodes = glob($path . DIRECTORY_SEPARATOR . '*');
+        foreach ($nodes as $node) {
+            if (is_dir($node)) {
+                if (!$this->addDir($node)) {
+                    return false;
+                }
+            } else if (is_file($node))  {
+                if (!$this->addFile($node)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+} // class Zipper
+    
+class BackupUtility {
 
     private $env_params = [];
     private $logfile_handler = null;
@@ -68,8 +90,8 @@ class do_bkp_db {
         return date($date_format);
     }
 
-    function get_filespec($schema_name, $name_suffix, $file_extension, $directory) {
-        $filename = "bkp-db-{$schema_name}" .
+    function get_filespec($schema_name, $name_suffix, $file_extension, $directory, $type) {
+        $filename = "bkp-{$type}-{$schema_name}" .
             ($name_suffix ? "-{$name_suffix}" : "") .
             "-" . $this->get_formatted_date(true) .
             ".{$file_extension}";
@@ -183,14 +205,23 @@ class do_bkp_db {
 
     function read_params($config_name) {
         $response = [
+            'backup_type' => $this->get_env('BACKUP_TYPE', $config_name) ?: 'db',
+            'mysql_server' => $this->get_env('MYSQL_SERVER', $config_name),
+            "mysql_port" => $this->get_env('MYSQL_PORT', $config_name) ?: '3306',
+            'mysql_database' => $this->get_env('MYSQL_DATABASE', $config_name),
             'mysql_user' => $this->get_env('MYSQL_USER', $config_name) ?: '',
             'mysql_password' => $this->get_env('MYSQL_PASSWORD', $config_name) ?: '',
-            "mysql_port" => $this->get_env('MYSQL_PORT', $config_name) ?: '3306',
-            'mysql_server' => $this->get_env('MYSQL_SERVER', $config_name),
-            'mysql_database' => $this->get_env('MYSQL_DATABASE', $config_name),
-            'backup_path' => $this->get_env('BACKUP_PATH', $config_name),
+            'app_name' => $this->get_env('APP_NAME', $config_name),
+            'app_root_path' => $this->get_env('APP_ROOT_PATH', $config_name),
             'name_suffix' => $this->get_env('NAME_SUFFIX', $config_name) ?: '',
+            'backup_path' => $this->get_env('BACKUP_PATH', $config_name),
             'log_file_path' => $this->get_env('LOG_FILE_PATH', $config_name),
+            'mtime_bkp' => (!is_null($this->get_env('MTIME_BKP', $config_name)) ? 
+                $this->get_env('MTIME_BKP', $config_name) : ''),
+            'mtime_log' => (!is_null($this->get_env('MTIME_LOG', $config_name)) ? 
+                $this->get_env('MTIME_LOG', $config_name) : ''),
+            'only_report' => $this->get_env('ONLY_REPORT', $config_name) ?: '0',
+            'exclude_filenames_with' => $this->get_env('EXCLUDE_FILENAMES_WITH', $config_name) ?: '',
             'debug' => $this->get_env('DEBUG', $config_name) ?: '0',
             'execution_method' => $this->get_env('EXECUTION_METHOD', $config_name) ?:
                 $this->global_params['default_execution_method'],
@@ -218,7 +249,7 @@ class do_bkp_db {
                 "ERROR: Output directory exists but is not a directory"
             );
         }
-        return $error;
+        return $error === false;
     }
 
     function perform_backup_shell_exec($dump_filespec) {
@@ -331,11 +362,11 @@ class do_bkp_db {
         return true;
     }
 
-    function zip_file($zip_filespec, $dump_filespec) {
+    function zip_file($zip_filespec, $dump_filespec, $is_directory=false) {
         switch($this->current_params['execution_method']) {
             case 'sql':
                 try {
-                    $zip = new ZipArchive();
+                    $zip = new Zipper();
                 } catch (\Error $e) {
                     $this->log_error("ERROR: opening ZipArchive: " . $e->getMessage());
                     return false;
@@ -347,13 +378,23 @@ class do_bkp_db {
                     $this->log_error("ERROR: cannot open <$zip_filespec>");
                     return false;
                 }
-                if (!$zip->addFile($dump_filespec)) {
-                    $zip->close();
-                    $this->log_error("ERROR: cannot zip .SQL file");
-                    return false;
+                if ($is_directory) {
+                    if (!$zip->addDir($dump_filespec)) {
+                        $zip->close();
+                        $this->log_error('ERROR: cannot Zip the directory: ' . $dump_filespec);
+                        return false;
+                    }
+                } else {
+                    // The second parameter defines and control file/directory structure inside the zip.
+                    // Use it if you DO NOT want files to be included with their absolute directory tree.
+                    if (!$zip->addFile($dump_filespec, basename($dump_filespec))) {
+                        $zip->close();
+                        $this->log_error('ERROR: cannot Zip the file: ' . basename($dump_filespec));
+                        return false;
+                    }
                 }
-                // echo "numfiles: " . $zip->numFiles . $this->eol_for_echo();
-                // echo "status:" . $zip->status . $this->eol_for_echo();
+                $this->log_msg('Files in Zip: ' . $zip->numFiles);
+                $this->log_msg('Zip status: ' . $zip->status);
                 $zip->close();
                 break;
             default:
@@ -370,8 +411,25 @@ class do_bkp_db {
         return true;
     }
 
-    function validate_backup_parameters() {
+    function validate_common_parameters() {
         $error = false;
+        if (!$this->current_params['log_file_path']) {
+            $this->log_error("ERROR: LOG_FILE_PATH must be specified");
+            $error = true;
+        }
+        if (!$this->current_params['backup_path']) {
+            $this->log_error("ERROR: BACKUP_PATH must be specified");
+            $error = true;
+        }
+        return !$error;
+    }
+
+    function validate_db_parameters() {
+        $error = false;
+        if (!$this->current_params['mysql_database']) {
+            $error = true;
+            $this->log_error("ERROR: Database name must be specified");
+        }
         if ($this->current_params['mysql_user'] && !$this->current_params['mysql_password']) {
             $error = true;
             $this->log_error("ERROR: Password must be specified when user is not empty");
@@ -380,11 +438,50 @@ class do_bkp_db {
             $error = true;
             $this->log_error("ERROR: Server name must be specified");
         }
-        if (!$this->current_params['backup_path']) {
+        if (!$this->validate_common_parameters()) {
             $error = true;
-            $this->log_error("ERROR: Backup directory must be specified");
         }
-        return $error;
+        return !$error;
+    }
+
+    function validate_app_parameters() {
+        $error = false;
+       if (!$this->current_params['app_root_path']) {
+            $this->log_error("ERROR: APP_ROOT_PATH must be specified");
+            $error = true;
+        }
+        if (!$this->current_params['app_name']) {
+            $this->log_error("ERROR: APP_NAME must be specified");
+            $error = true;
+        }
+        if (!$this->validate_common_parameters()) {
+            $error = true;
+        }
+        return !$error;
+    }
+
+    function validate_recycle_parameters() {
+        $error = false;
+        if ($this->current_params['mtime_bkp']==='') {
+            $this->log_error("ERROR: MTIME_BKP must be specified");
+            $error = true;
+        }
+        if ($this->current_params['mtime_log']==='') {
+            $this->log_error("ERROR: MTIME_LOG must be specified");
+            $error = true;
+        }
+        if ($this->current_params['mtime_bkp']==='0') {
+            $this->log_error("ERROR: MTIME_BKP cannot be 0");
+            $error = true;
+        }
+        if ($this->current_params['mtime_log']==='0') {
+            $this->log_error("ERROR: MTIME_LOG cannot be 0");
+            $error = true;
+        }
+        if (!$this->validate_common_parameters()) {
+            $error = true;
+        }
+        return !$error;
     }
 
     function human_readable_filesize($bytes, $dec = 2): string {
@@ -425,28 +522,30 @@ class do_bkp_db {
         return true;
     }
 
-    function perform_backup() {
+    function perform_db_backup() {
         $this->log_msg(
             "Database Backup Started | DB: {$this->current_params['mysql_database']} " .
             "| Name Suffix: {$this->current_params['name_suffix']} | " . $this->get_formatted_date()
         );
 
-        $error = $this->validate_backup_parameters();
-        if ($error) {
-            return;
-        }
-
         $output_path = $this->current_params['backup_path'] . DIRECTORY_SEPARATOR . $this->current_params['mysql_database'];
-        $error = $this->verify_create_folder($output_path);
-        if ($error !== false) {
-            return;
+        if (!$this->verify_create_folder($output_path)) {
+            return false;
         }
 
         $dump_filespec = $this->get_filespec(
-            $this->current_params['mysql_database'], $this->current_params['name_suffix'], 'sql', $output_path
+            $this->current_params['mysql_database'],
+            $this->current_params['name_suffix'],
+            'sql',
+            $output_path,
+            $this->current_params['backup_type']
         );
         $zip_filespec = $this->get_filespec(
-            $this->current_params['mysql_database'], $this->current_params['name_suffix'], 'zip', $output_path
+            $this->current_params['mysql_database'],
+            $this->current_params['name_suffix'],
+            'zip',
+            $output_path,
+            $this->current_params['backup_type']
         );
 
         $this->log_msg("Creating Backup ({$this->current_params['execution_method']}): {$dump_filespec}");
@@ -459,12 +558,12 @@ class do_bkp_db {
                 $success = $this->perform_backup_shell_exec($dump_filespec);
         }
         if (!$success) {
-            return;
+            return false;
         }
 
         $this->log_msg('Zipping File: ' . $zip_filespec);
         if (!$this->zip_file($zip_filespec, $dump_filespec)) {
-            return;
+            return false;
         }
         $this->log_msg(
             'Zip of mysqldump successfully finished at ' . $this->get_formatted_date()
@@ -476,9 +575,204 @@ class do_bkp_db {
             return false;
         }
 
-        $this->log_msg('Backup Completed');
+        $this->log_msg('Databae Backup Completed');
 
         $this->report_backup_location($zip_filespec);
+        return true;
+    }
+
+    function perform_app_backup() {
+        $this->log_msg(
+            "Application Backup Started | DB: {$this->current_params['app_name']} " .
+            "| Name Suffix: {$this->current_params['name_suffix']} | " . $this->get_formatted_date()
+        );
+
+        // $app_root_path = realpath($this->current_params['app_root_path']);
+        $app_root_path = $this->current_params['app_root_path'];
+        $output_path = $this->current_params['backup_path'] . DIRECTORY_SEPARATOR . $this->current_params['app_name'];
+        if (!$this->verify_create_folder($output_path)) {
+            return false;
+        }
+
+        $zip_filespec = $this->get_filespec(
+            $this->current_params['app_name'],
+            $this->current_params['name_suffix'],
+            'zip',
+            $output_path,
+            $this->current_params['backup_type']
+        );
+
+        $this->log_msg('Zipping File: ' . $zip_filespec);
+        if (!$this->zip_file($zip_filespec, $app_root_path, true)) {
+            return false;
+        }
+        $this->log_msg(
+            'Zip of mysqldump successfully finished at ' . $this->get_formatted_date()
+        );
+
+        $this->log_msg('Application Backup Completed');
+
+        $this->report_backup_location($zip_filespec);
+        return true;
+    }
+
+    
+    function remove_files_older_than_recurive($working_path, $threshold, $only_report, $report_all) {
+        $error = false;
+        $processed = 0;
+        $removed = 0;
+        $files = glob($working_path . DIRECTORY_SEPARATOR . '*');
+        foreach ($files as $file) {
+            if (!is_file($file)) {
+                $result = $this->remove_files_older_than_recurive(
+                    $file, $threshold, $only_report, $report_all
+                );
+                $error = $error || $result['error'];
+                $processed += $result['processed'];
+                $removed += $result['removed'];
+                continue;
+            }
+            $processed++;
+            $result = 'Out of range';
+            $report_line = 
+                $file . ' ' .
+                '| Date: ' . date("Y-m-d H:i:s ", filectime($file)) .
+                '| Size: ' . $this->human_readable_filesize(filesize($file)) .
+                '| Result: '
+            ;
+            if ($threshold < filectime($file)) {
+                if ($report_all === '1') {
+                    $this->log_msg($report_line . $result);
+                }
+                continue;
+            }
+            if ($only_report === '1') {
+                $result = 'Skipped';
+                $this->log_msg($report_line . $result);
+                continue;
+            }
+            $result = 'Deleted';
+            if (!unlink($file)) {
+                $error = true;
+                $result = 'ERROR: NOT Deleted';
+            } else {
+                $removed++;
+            }
+            $this->log_msg($report_line . $result);
+        }
+        return [
+            'processed' => $processed,
+            'removed' => $removed,
+            'error' => $error
+        ];
+    }
+
+    function remove_files_older_than($working_path, $days_older, $only_report, $report_all='1') {
+        $this->log_msg('');
+        $this->log_msg('* RECYCLE Path: ' . $working_path);
+        $this->log_msg('Days older: ' . $days_older);
+        $this->log_msg('Only report: ' . ($only_report == '0' ? 'No' : 'Yes'));
+        $this->log_msg('');
+        $threshold = strtotime('-' . $days_older . ' day');
+        $result = $this->remove_files_older_than_recurive(
+            $working_path, $threshold, $only_report, $report_all
+        );
+        $this->log_msg('');
+        $this->log_msg('Files processed: ' . $result['processed']);
+        $this->log_msg('Files deleted: ' . $result['removed']);
+        $this->log_msg('Errors: ' . ($result['error']==true? 'Yes' : 'No'));
+        $this->log_msg('');
+        return !$result['error'];
+    }
+
+    function perform_backups_recycle() {
+        $this->log_msg(
+            "Backup Recycle Started " .
+            "| Name Suffix: {$this->current_params['name_suffix']} | " . $this->get_formatted_date()
+        );
+
+        if (!$this->remove_files_older_than(
+                $this->current_params['backup_path'],
+                $this->current_params['mtime_bkp'],
+                $this->current_params['only_report']
+            )
+        ) {
+            return false;
+        }
+
+        if (!$this->remove_files_older_than(
+                $this->current_params['log_file_path'],
+                $this->current_params['mtime_log'],
+                $this->current_params['only_report']
+            )
+        ) {
+            return false;
+        }
+
+        $this->log_msg('Backup Recycling Completed');
+        return true;
+    }
+
+    function db_backup($config_name) {
+        // Verify parameters
+        if (!$this->validate_db_parameters()) {
+            return false;
+        }
+        // Open the log file for this backup group
+        $this->logfile_handler = $this->prepare_log_handler(
+            $this->current_params['mysql_database'],
+            $this->current_params['name_suffix'],
+            $this->current_params['log_file_path'],
+            $this->current_params['backup_type']
+        );
+        if ($this->logfile_handler === false) {
+            return false;
+        }
+        // Perform backup
+        $this->log_msg(PHP_EOL . '>>> Backup Group Name: ' . $config_name);
+        $this->perform_db_backup();
+        return true;
+    }
+
+    function app_backup($config_name) {
+        // Verify parameters
+        if (!$this->validate_app_parameters()) {
+            return false;
+        }
+        // Open the log file for this backup group
+        $this->logfile_handler = $this->prepare_log_handler(
+            $this->current_params['app_name'],
+            $this->current_params['name_suffix'],
+            $this->current_params['log_file_path'],
+            $this->current_params['backup_type']
+        );
+        if ($this->logfile_handler === false) {
+            return false;
+        }
+        // Performs backup
+        $this->log_msg(PHP_EOL . '>>> App Backup Group Name: ' . $config_name);
+        $this->perform_app_backup();
+        return true;
+    }
+
+    function backups_recycle($config_name) {
+        // Verify parameters
+        if (!$this->validate_recycle_parameters()) {
+            return false;
+        }
+        // Open the log file for this backup group
+        $this->logfile_handler = $this->prepare_log_handler(
+            $this->current_params['backup_type'],
+            $this->current_params['name_suffix'],
+            $this->current_params['log_file_path'],
+            'all'
+        );
+        if ($this->logfile_handler === false) {
+            return false;
+        }
+        // Performs backup
+        $this->log_msg(PHP_EOL . '>>> Recycle Group Name: ' . $config_name);
+        $this->perform_backups_recycle();
         return true;
     }
 
@@ -499,14 +793,17 @@ class do_bkp_db {
         return true;
     }
 
-    function prepare_log_handler($schema_name, $name_suffix, $log_file_path) {
+    function prepare_log_handler($schema_name, $name_suffix, $log_file_path, $backup_type) {
         // Build the log file fullpath
         $this->log_filespec = $this->get_filespec(
-            $schema_name, $name_suffix, 'log', $log_file_path
+            $schema_name,
+            $name_suffix,
+            'log',
+            $log_file_path,
+            $backup_type
         );
         // Try to create directories if not exist
-        $error = $this->verify_create_folder($log_file_path);
-        if ($error == true) {
+        if (!$this->verify_create_folder($log_file_path)) {
             return false;
         }
         // It will open a log file for each option group
@@ -522,7 +819,8 @@ class do_bkp_db {
         $this->main_log_file_handler = $this->prepare_log_handler(
             'main',
             '',
-            $main_log_file
+            $main_log_file,
+            'all',
         );
         if($this->main_log_file_handler === false) {
             throw new Exception('ERROR in do_bkp_db: Cannot open main log file: ');
@@ -579,27 +877,26 @@ class do_bkp_db {
 
             // Get environment variable values for this option group
             $this->current_params = $this->read_params($config_name);
-            if (!$this->current_params['mysql_database']) {
-                $this->log_error("ERROR: Database name must be specified");
-                continue;
+
+            switch ($this->current_params['backup_type']) {
+                case 'app':
+                    $success = $this->app_backup($config_name);
+                    break;
+                case 'recycle':
+                    $success = $this->backups_recycle($config_name);
+                    break;
+                case 'db':
+                default:
+                    $success = $this->db_backup($config_name);
             }
-            // It will open a log file for each option group
-            $this->logfile_handler = $this->prepare_log_handler(
-                $this->current_params['mysql_database'],
-                $this->current_params['name_suffix'],
-                $this->current_params['log_file_path']
-            );
-            if ($this->logfile_handler === false) {
-                continue;
+
+            if ($success) {
+                // Close log file
+                $this->log_msg("The Log file is in: {$this->log_filespec}");
+                $this->log_msg("Process Completed at " . $this->get_formatted_date());
+                fclose($this->logfile_handler);
             }
-            // Perform backup
-            $this->log_msg(PHP_EOL . '>>> Backup Group Name: ' . $config_name);
-            $this->perform_backup($this->current_params);
-            // Close log file
-            $this->log_msg("The Log file is in: {$this->log_filespec}");
-            $this->log_msg("Process Completed at " . $this->get_formatted_date());
-            fclose($this->logfile_handler);
-  
+
             // Re-init this group's variables
             $this->logfile_handler = null;
             $this->log_filespec = '';
@@ -611,7 +908,7 @@ class do_bkp_db {
             }
         }
     }
-}
+} // class BackupUtility
 
 $global_params = [
     'process_name' => 'MBI MySQL Backup Utility',
@@ -621,6 +918,6 @@ $global_params = [
     // 'default_execution_method' => 'system',
 ];
 
-$do_bkp_db = new do_bkp_db($argv, $global_params);
-$do_bkp_db->main();
+$backup_utility = new BackupUtility($argv, $global_params);
+$backup_utility->main();
 ?>

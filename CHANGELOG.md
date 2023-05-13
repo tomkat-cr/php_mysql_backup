@@ -20,6 +20,11 @@ This project adheres to [Semantic Versioning](http://semver.org/) and [Keep a Ch
 ## 0.1.5 (2023-05-13)
 ---
 
+### New
+File backup added.
+Backup recycling added.
+Zipper class that handles directories recursively
+
 ### Changes
 "web_cron" app has been renamed to "web_run".
 "web_run" new execution method 'include' to run the do_bkp_db as a PHP include, enabling to run in shared hosting environments where shell() is disabled.
@@ -28,6 +33,7 @@ Error trapping was added to docker-start-point.sh.
 do_bkp_db: $log_filespec converted to a class property to be reported appropiately in the output log file.
 do_bkp_db: double quotes changed to single quotes in all parameters entry names.
 do_bkp_db: the 2nd CLI parameter is now web=1/0 to handle calls from "web_run" and do some echo() of the backup groups processed.
+Class do_bkp_db renamed to BackupUtility.
 
 
 ## 0.1.4 (2023-05-12)
