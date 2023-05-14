@@ -221,6 +221,7 @@ class BackupUtility {
             'mtime_log' => (!is_null($this->get_env('MTIME_LOG', $config_name)) ? 
                 $this->get_env('MTIME_LOG', $config_name) : ''),
             'only_report' => $this->get_env('ONLY_REPORT', $config_name) ?: '0',
+            'report_all' => $this->get_env('REPORT_ALL', $config_name) ?: '1',
             'exclude_filenames_with' => $this->get_env('EXCLUDE_FILENAMES_WITH', $config_name) ?: '',
             'debug' => $this->get_env('DEBUG', $config_name) ?: '0',
             'execution_method' => $this->get_env('EXECUTION_METHOD', $config_name) ?:
@@ -339,7 +340,7 @@ class BackupUtility {
             while ($row = $result->fetch_row()) {
                 $sql = "INSERT INTO `$table` VALUES (";
                 for ($i = 0; $i < $num_columns; $i++) {
-                    $sql .= $mysqli->real_escape_string($row[$i]);
+                    $sql .= '"' . $mysqli->real_escape_string($row[$i]) . '"';
                     if ($i < $num_columns - 1) {
                         $sql .= ", ";
                     }
@@ -395,6 +396,7 @@ class BackupUtility {
                 }
                 $this->log_msg('Files in Zip: ' . $zip->numFiles);
                 $this->log_msg('Zip status: ' . $zip->status);
+                $this->log_msg('Closing Zip file...');
                 $zip->close();
                 break;
             default:
@@ -528,7 +530,12 @@ class BackupUtility {
             "| Name Suffix: {$this->current_params['name_suffix']} | " . $this->get_formatted_date()
         );
 
-        $output_path = $this->current_params['backup_path'] . DIRECTORY_SEPARATOR . $this->current_params['mysql_database'];
+        $output_path = 
+            $this->current_params['backup_path'] .
+            DIRECTORY_SEPARATOR .
+            $this->current_params['backup_type'] . '_' .
+            $this->current_params['mysql_database']
+        ;
         if (!$this->verify_create_folder($output_path)) {
             return false;
         }
@@ -589,7 +596,12 @@ class BackupUtility {
 
         // $app_root_path = realpath($this->current_params['app_root_path']);
         $app_root_path = $this->current_params['app_root_path'];
-        $output_path = $this->current_params['backup_path'] . DIRECTORY_SEPARATOR . $this->current_params['app_name'];
+        $output_path =
+            $this->current_params['backup_path'] .
+            DIRECTORY_SEPARATOR .
+            $this->current_params['backup_type'] . '_' .
+            $this->current_params['app_name']
+        ;
         if (!$this->verify_create_folder($output_path)) {
             return false;
         }
@@ -615,37 +627,62 @@ class BackupUtility {
         $this->report_backup_location($zip_filespec);
         return true;
     }
-
     
-    function remove_files_older_than_recurive($working_path, $threshold, $only_report, $report_all) {
+    function remove_files_older_than_recurive(
+        $base_path,
+        $working_path,
+        $threshold,
+        $exclude_filenames,
+        $only_report,
+        $report_all
+    ) {
         $error = false;
         $processed = 0;
+        $can_remove = 0;
         $removed = 0;
         $files = glob($working_path . DIRECTORY_SEPARATOR . '*');
         foreach ($files as $file) {
             if (!is_file($file)) {
                 $result = $this->remove_files_older_than_recurive(
-                    $file, $threshold, $only_report, $report_all
+                    $base_path,
+                    $file,
+                    $threshold,
+                    $exclude_filenames,
+                    $only_report,
+                    $report_all
                 );
                 $error = $error || $result['error'];
                 $processed += $result['processed'];
+                $can_remove += $result['can_remove'];
                 $removed += $result['removed'];
                 continue;
             }
             $processed++;
-            $result = 'Out of range';
+            $result = '???';
             $report_line = 
-                $file . ' ' .
-                '| Date: ' . date("Y-m-d H:i:s ", filectime($file)) .
-                '| Size: ' . $this->human_readable_filesize(filesize($file)) .
-                '| Result: '
+                str_replace($base_path . DIRECTORY_SEPARATOR, '', $file) .
+                ' | ' . date('Y-m-d H:i:s', filectime($file)) .
+                ' | ' . $this->human_readable_filesize(filesize($file)) .
+                ' | '
             ;
-            if ($threshold < filectime($file)) {
+            if (
+                $exclude_filenames !== '' && 
+                strpos(basename($file), $exclude_filenames) !== false
+            ) {
+                $result = 'Preserve';
                 if ($report_all === '1') {
                     $this->log_msg($report_line . $result);
                 }
                 continue;
             }
+            if ($threshold < filectime($file)) {
+                $result = 'Out of range';
+                if ($report_all === '1') {
+                    $this->log_msg($report_line . $result);
+                }
+                continue;
+            }
+            $can_remove++;
             if ($only_report === '1') {
                 $result = 'Skipped';
                 $this->log_msg($report_line . $result);
@@ -663,11 +700,18 @@ class BackupUtility {
         return [
             'processed' => $processed,
             'removed' => $removed,
+            'can_remove' => $can_remove,
             'error' => $error
         ];
     }
 
-    function remove_files_older_than($working_path, $days_older, $only_report, $report_all='1') {
+    function remove_files_older_than(
+        $working_path,
+        $days_older,
+        $exclude_filenames,
+        $only_report,
+        $report_all
+    ) {
         $this->log_msg('');
         $this->log_msg('* RECYCLE Path: ' . $working_path);
         $this->log_msg('Days older: ' . $days_older);
@@ -675,10 +719,16 @@ class BackupUtility {
         $this->log_msg('');
         $threshold = strtotime('-' . $days_older . ' day');
         $result = $this->remove_files_older_than_recurive(
-            $working_path, $threshold, $only_report, $report_all
+            $working_path,
+            $working_path,
+            $threshold,
+            $exclude_filenames,
+            $only_report,
+            $report_all
         );
         $this->log_msg('');
         $this->log_msg('Files processed: ' . $result['processed']);
+        $this->log_msg('Files can be deleted: ' . $result['can_remove']);
         $this->log_msg('Files deleted: ' . $result['removed']);
         $this->log_msg('Errors: ' . ($result['error']==true? 'Yes' : 'No'));
         $this->log_msg('');
@@ -694,7 +744,9 @@ class BackupUtility {
         if (!$this->remove_files_older_than(
                 $this->current_params['backup_path'],
                 $this->current_params['mtime_bkp'],
-                $this->current_params['only_report']
+                $this->current_params['exclude_filenames_with'],
+                $this->current_params['only_report'],
+                $this->current_params['report_all']
             )
         ) {
             return false;
@@ -703,7 +755,9 @@ class BackupUtility {
         if (!$this->remove_files_older_than(
                 $this->current_params['log_file_path'],
                 $this->current_params['mtime_log'],
-                $this->current_params['only_report']
+                $this->current_params['exclude_filenames_with'],
+                $this->current_params['only_report'],
+                $this->current_params['report_all']
             )
         ) {
             return false;

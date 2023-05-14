@@ -24,8 +24,12 @@ function read_dotenv($env_filename) {
     return $env_params;
 }
 
-function log_exit($msg) {
+function log_msg($msg) {
     echo $msg . PHP_EOL;
+}
+
+function log_exit($msg) {
+    log_msg($msg);
     exit();
 }
 
@@ -86,11 +90,12 @@ class dbSeed {
 
     function run() {
         $dbConnection = (new DatabaseConnector($this->env_filename))->getConnection();
-        if ($this->sql_filename != '') {
-            $statement = $this->get_sql_statement_from_file($this->sql_filename);
-        } else {
+        if ($this->sql_filename === '') {
             $statement = $this->default_sql_statement();
         }
+        // else {
+        //     $statement = $this->get_sql_statement_from_file($this->sql_filename);
+        // }
 
         // Truncate
         try {
@@ -98,32 +103,84 @@ class dbSeed {
                 "SELECT CONCAT('DROP TABLE ',table_schema,'.',TABLE_NAME, ';') " .
                 "FROM INFORMATION_SCHEMA.TABLES " .
                 "WHERE table_schema = '{$this->env_params['MYSQL_DATABASE']}';";
-            echo PHP_EOL . $sql . PHP_EOL . PHP_EOL;
+            log_msg(PHP_EOL . $sql . PHP_EOL);
             $query_result = $dbConnection->query($sql);
             $query_result_string = '';
             foreach ($query_result as $row) {
-                echo $row[0] . PHP_EOL;
+                log_msg($row[0]);
                 $query_result_string .= $row[0] . PHP_EOL;
             }
-            echo PHP_EOL;
+            log_msg('');
             if (!empty($query_result_string)) {
                 $dbConnection->exec($query_result_string);
-                echo "DROP ALL TABLES: Success!\n";
+                log_msg('DROP ALL TABLES: Success!');
             } else {
-                echo "Nothing to DROP...\n";
+                log_msg('Nothing to DROP...');
             }
-            echo PHP_EOL;
+            log_msg('');
         } catch (\PDOException $e) {
             log_exit('PDOException running TRUNCATE: ' . $e->getMessage());
         }
  
         // Restore
-        try {
-            $dbConnection->exec($statement);
-            echo "SQL script: Success!\n";
-        } catch (\PDOException $e) {
-            log_exit('PDOException running the SQL script: ' . $e->getMessage());
-        }    
+        if ($this->sql_filename === '') {
+            try {
+                log_msg('Processing SQL script...');
+                $dbConnection->exec($statement);
+                log_msg('SQL script: Success!');
+            } catch (\PDOException $e) {
+                log_exit('PDOException running the SQL script: ' . $e->getMessage());
+            }    
+        } else {
+            $this->cli_restore($this->sql_filename);
+        }
+    }
+
+    function cli_restore($filename) {
+        if (!file_exists($filename)) {
+            log_exit('ERROR SQL file does not exist: ' . $filename);
+        }
+        $host = $this->env_params['MYSQL_SERVER'];
+        $port = $this->env_params['MYSQL_PORT'];
+        $db   = $this->env_params['MYSQL_DATABASE'];
+        $user = $this->env_params['MYSQL_USER'];
+        $pass = $this->env_params['MYSQL_PASSWORD'];
+
+        $mysql_options = 
+            "-h{$host}" .
+            " --port {$port}" .
+            " -u{$user} " .
+            "-p\"{$pass}\""; 
+
+        $cmd = [
+            'mysql',
+            $mysql_options,
+            $db,
+            '<' . escapeshellarg($filename)
+        ];
+
+        log_msg(
+            'Command: ' . 
+            str_replace(
+                "-p\"{$pass}\"",
+                "-p\"*******\"",
+                implode(' ', $cmd)
+            )
+        );
+        $result_code = 0;
+        $output_array = [];
+
+        log_msg('MySQL restore in progress...');
+        $output = exec(implode(" ", $cmd), $output_array, $result_code);
+        log_msg('Result:');
+        log_msg($output);
+        print_r($output_array);
+        if ($output === false || $result_code !== 0) {
+            log_msg('ERROR in MySQL restore.');
+            return false;
+        }
+        log_msg('MySQL restore: Success!');
+        return true;
     }
 
     function get_sql_statement_from_file($filename) {
