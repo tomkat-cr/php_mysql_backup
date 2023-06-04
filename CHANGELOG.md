@@ -17,6 +17,14 @@ This project adheres to [Semantic Versioning](http://semver.org/) and [Keep a Ch
 ### Breaks
 
 
+## 0.1.6 (2023-06-03)
+---
+
+### New
+Remote replication script "remote_replication_lftp.sh" to copy backups via LFTP to a host different than the backup server.
+Other replication/sincronization/recycling scripts were added to maintain the host receiving the backups.
+
+
 ## 0.1.5 (2023-05-13)
 ---
 
