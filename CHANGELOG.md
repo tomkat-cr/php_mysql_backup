@@ -17,6 +17,12 @@ This project adheres to [Semantic Versioning](http://semver.org/) and [Keep a Ch
 ### Breaks
 
 
+## 0.1.7 (2023-06-17)
+
+### Fix
+Replication cleaner wasn't doing the recycling
+
+
 ## 0.1.6 (2023-06-03)
 ---
 
