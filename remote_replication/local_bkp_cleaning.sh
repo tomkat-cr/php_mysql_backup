@@ -1,7 +1,7 @@
 #!/bin/sh
 #
-# do_bkp_cleaning-pi.sh
-# Remote backup replication & logs recycling
+# local_bkp_cleaning.sh
+# Local backup replication & logs recycling.
 # 2021-05-01 | CR
 #
 

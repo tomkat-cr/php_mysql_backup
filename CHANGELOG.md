@@ -17,10 +17,20 @@ This project adheres to [Semantic Versioning](http://semver.org/) and [Keep a Ch
 ### Breaks
 
 
+## 0.1.8 (2023-06-18)
+
+### New
+"local_bkp_report.sh" script created to Report the backup directory content [ls], disk space used by the backups [du], and free disk space [df].
+
+### Change
+"crontab.txt" entries use the complete project path "/php_mysql_backup/remote_replication/", so the SCRIPTS_DIR variable can be shared between different projects.
+do_bkp_cleaning-pi.sh renamed to local_bkp_cleaning.sh
+
+
 ## 0.1.7 (2023-06-17)
 
 ### Fix
-Replication cleaner wasn't doing the recycling
+Replication cleaner wasn't doing the recycling.
 
 
 ## 0.1.6 (2023-06-03)

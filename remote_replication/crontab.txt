@@ -3,16 +3,16 @@
 # This crontab must be installed on the 'root' user.
 #
 MAILTO="root"
-SCRIPTS_DIR="/root/menus/remote_replication"
+SCRIPTS_DIR="/root/apps"
 #
 # Backup remote replication with lftp - 3 AM
-00 3 * * * sh ${SCRIPTS_DIR}/remote_replication_lftp.sh >/dev/null
+00 3 * * * sh ${SCRIPTS_DIR}/php_mysql_backup/remote_replication/remote_replication_lftp.sh >/dev/null
 #
 # Backup remote replication with rsync+ssh - 4 AM
-#00 4 * * * sh ${SCRIPTS_DIR}/rsync_backups.sh >/dev/null
+#00 4 * * * sh ${SCRIPTS_DIR}/php_mysql_backup/remote_replication/rsync_backups.sh >/dev/null
 #
 # Backup local replication - 5 AM
-#00 5 * * * sh ${SCRIPTS_DIR}/backup_local_zip.sh >/dev/null
+#00 5 * * * sh ${SCRIPTS_DIR}/php_mysql_backup/remote_replication/backup_local_zip.sh >/dev/null
 #
 # Backup recycling - 6 AM
-00 6 * * * sh ${SCRIPTS_DIR}/do_bkp_cleaning-pi.sh -deletion >/dev/null
+00 6 * * * sh ${SCRIPTS_DIR}/php_mysql_backup/remote_replication/local_bkp_cleaning.sh -deletion >/dev/null
