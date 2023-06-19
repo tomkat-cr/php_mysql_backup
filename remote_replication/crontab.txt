@@ -16,3 +16,5 @@ SCRIPTS_DIR="/root/apps"
 #
 # Backup recycling - 6 AM
 00 6 * * * sh ${SCRIPTS_DIR}/php_mysql_backup/remote_replication/local_bkp_cleaning.sh -deletion >/dev/null
+# Backup report - sunday 8 AM
+0 8 * * SUN sh ${SCRIPTS_DIR}/php_mysql_backup/remote_replication/local_bkp_report.sh >/dev/null

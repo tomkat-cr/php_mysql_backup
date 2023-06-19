@@ -29,6 +29,15 @@ if [ "${ERROR_MSG}" = "" ]; then
 fi
 
 if [ "${ERROR_MSG}" = "" ]; then
+    if ! echo "Backup report for: ${HOSTNAME}" >${REPORT_FILE}
+    then
+        ERROR_MSG="ERROR: could not create report file: ${REPORT_FILE}"
+    else
+        echo "date: ${DATE_TIME_PART}" >>${REPORT_FILE}
+    fi
+fi
+
+if [ "${ERROR_MSG}" = "" ]; then
     echo "" >>${REPORT_FILE}
     echo "*** ls -lahR ${LOCAL_BACKUP_DIR}/*" >>${REPORT_FILE}
     echo "" >>${REPORT_FILE}
@@ -59,9 +68,9 @@ fi
 if [ "${ERROR_MSG}" = "" ]; then
     if [ "${EMAIL_APP}" != "" ]; then
         if [ "${EMAIL_TO}" != "" ]; then
-            if ! ${EMAIL_APP} -t ${EMAIL_TO} -a ${REPORT_FILE} -s "Local Backup Report | ${DATE_TIME_PART}"
+            if ! ${EMAIL_APP} -t ${EMAIL_TO} -a ${REPORT_FILE} -s "Local Backup Report for: ${HOSTNAME} | ${DATE_TIME_PART}"
             then
-                ERROR_MSG="ERROR: could not run: ${EMAIL_APP} -t ${EMAIL_TO} -a ${REPORT_FILE} -s \"Local Backup Report | ${DATE_TIME_PART}\""
+                ERROR_MSG="ERROR: could not run: ${EMAIL_APP} -t ${EMAIL_TO} -a ${REPORT_FILE} -s \"Local Backup Report for: ${HOSTNAME} | ${DATE_TIME_PART}\""
             fi
         fi
     fi
