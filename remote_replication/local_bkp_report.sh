@@ -46,6 +46,24 @@ if [ "${ERROR_MSG}" = "" ]; then
 fi
 
 if [ "${ERROR_MSG}" = "" ]; then
+    if [ "${REPORT_CRON_APPS}" != "" ]; then
+        echo "" >>${REPORT_FILE}
+        echo "*** CRONTAB runs:" >>${REPORT_FILE}
+        if [ -f /var/log/system.log ];then
+            SYSLOG_FILE="/var/log/system.log"
+        else
+            SYSLOG_FILE="/var/log/syslog"
+        fi
+        for i in ${REPORT_CRON_APPS//,/ }
+        do
+            echo "" >>${REPORT_FILE}
+            echo "grep $i ${SYSLOG_FILE} | tail -5" >>${REPORT_FILE}
+            echo "`grep $i ${SYSLOG_FILE} | tail -5`" >>${REPORT_FILE}
+        done
+    fi
+fi
+
+if [ "${ERROR_MSG}" = "" ]; then
     echo "" >>${REPORT_FILE}
     echo "*** ls -lahR ${LOCAL_BACKUP_DIR}/*" >>${REPORT_FILE}
     echo "" >>${REPORT_FILE}
@@ -73,13 +91,16 @@ if [ "${ERROR_MSG}" = "" ]; then
     fi
 fi
 
-if [ "${ERROR_MSG}" = "" ]; then
-    if [ "${EMAIL_APP}" != "" ]; then
-        if [ "${EMAIL_TO}" != "" ]; then
-            if ! ${EMAIL_APP} -t ${EMAIL_TO} -a ${REPORT_FILE} -s "Local Backup Report for: ${REPORT_HOSTNAME} | ${DATE_TIME_PART}"
-            then
-                ERROR_MSG="ERROR: could not run: ${EMAIL_APP} -t ${EMAIL_TO} -a ${REPORT_FILE} -s \"Local Backup Report for: ${REPORT_HOSTNAME} | ${DATE_TIME_PART}\""
-            fi
+if [ "${EMAIL_APP}" != "" ]; then
+    if [ "${EMAIL_TO}" != "" ]; then
+        if [ "${ERROR_MSG}" = "" ]; then
+            MESSAGE="No errors in report."
+        else
+            MESSAGE="Errors in report: ${ERROR_MSG}"
+        fi
+        if ! ${EMAIL_APP} -t ${EMAIL_TO} -a ${REPORT_FILE} -s "Local Backup Report for: ${REPORT_HOSTNAME} | ${DATE_TIME_PART}" -m "${MESSAGE}"
+        then
+            ERROR_MSG="ERROR: could not run: ${EMAIL_APP} -t ${EMAIL_TO} -a ${REPORT_FILE} -s \"Local Backup Report for: ${REPORT_HOSTNAME} | ${DATE_TIME_PART}\""
         fi
     fi
 fi
