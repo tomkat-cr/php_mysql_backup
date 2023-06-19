@@ -17,6 +17,12 @@ This project adheres to [Semantic Versioning](http://semver.org/) and [Keep a Ch
 ### Breaks
 
 
+## 0.1.9 (2023-06-19)
+
+### Fix
+Hostname resolution enhanced in local_bkp_report.sh, specially when the report runs under sh.
+
+
 ## 0.1.8 (2023-06-18)
 
 ### New

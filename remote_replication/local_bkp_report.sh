@@ -14,6 +14,14 @@ SCRIPTS_DIR="`pwd`"
 DATE_TIME_PART="`date +%Y-%m-%d`_`date +%H-%M`";
 REPORT_FILE="${REPORT_DIR}/local_bkp_report_${DATE_TIME_PART}.txt"
 
+REPORT_HOSTNAME="${HOSTNAME}"
+if [ "${REPORT_HOSTNAME}" = "" ];then
+    REPORT_HOSTNAME="`hostname`"
+fi
+if [ "${REPORT_HOSTNAME}" = "" ];then
+    REPORT_HOSTNAME="`cat /etc/hostname`"
+fi
+
 if [ ! -f "${SCRIPTS_DIR}/.env" ]; then
     ERROR_MSG="ERROR: could not find ${SCRIPTS_DIR}/.env"
 fi
@@ -29,7 +37,7 @@ if [ "${ERROR_MSG}" = "" ]; then
 fi
 
 if [ "${ERROR_MSG}" = "" ]; then
-    if ! echo "Backup report for: ${HOSTNAME}" >${REPORT_FILE}
+    if ! echo "Backup report for: ${REPORT_HOSTNAME}" >${REPORT_FILE}
     then
         ERROR_MSG="ERROR: could not create report file: ${REPORT_FILE}"
     else
@@ -68,9 +76,9 @@ fi
 if [ "${ERROR_MSG}" = "" ]; then
     if [ "${EMAIL_APP}" != "" ]; then
         if [ "${EMAIL_TO}" != "" ]; then
-            if ! ${EMAIL_APP} -t ${EMAIL_TO} -a ${REPORT_FILE} -s "Local Backup Report for: ${HOSTNAME} | ${DATE_TIME_PART}"
+            if ! ${EMAIL_APP} -t ${EMAIL_TO} -a ${REPORT_FILE} -s "Local Backup Report for: ${REPORT_HOSTNAME} | ${DATE_TIME_PART}"
             then
-                ERROR_MSG="ERROR: could not run: ${EMAIL_APP} -t ${EMAIL_TO} -a ${REPORT_FILE} -s \"Local Backup Report for: ${HOSTNAME} | ${DATE_TIME_PART}\""
+                ERROR_MSG="ERROR: could not run: ${EMAIL_APP} -t ${EMAIL_TO} -a ${REPORT_FILE} -s \"Local Backup Report for: ${REPORT_HOSTNAME} | ${DATE_TIME_PART}\""
             fi
         fi
     fi
