@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #
 # local_bkp_report.sh
 # Report the backup directory content [ls], disk space used by the backups [du], and free disk space [df]. 

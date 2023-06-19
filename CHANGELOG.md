@@ -24,6 +24,7 @@ local_bkp_report.sh includes the cron run applications in the report.
 
 ### Fix
 Hostname resolution enhanced in local_bkp_report.sh, specially when the report runs under sh.
+local_bkp_report.sh must be run under bash to do a effective comma substitution on REPORT_CRON_APPS
 
 
 ## 0.1.8 (2023-06-18)
