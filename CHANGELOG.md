@@ -17,6 +17,12 @@ This project adheres to [Semantic Versioning](http://semver.org/) and [Keep a Ch
 ### Breaks
 
 
+## 0.1.9 (2023-09-08)
+
+### New
+local_bkp_report.sh includes the REPORT_LOG_FILES in the report.
+
+
 ## 0.1.9 (2023-06-19)
 
 ### New

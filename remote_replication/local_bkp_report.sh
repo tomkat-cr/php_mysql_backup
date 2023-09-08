@@ -64,6 +64,20 @@ if [ "${ERROR_MSG}" = "" ]; then
 fi
 
 if [ "${ERROR_MSG}" = "" ]; then
+    if [ "${REPORT_LOG_FILES}" != "" ]; then
+        echo "" >>${REPORT_FILE}
+        echo "*** LOG FILES Report:" >>${REPORT_FILE}
+        for i in ${REPORT_LOG_FILES//,/ }
+        do
+            echo "" >>${REPORT_FILE}
+            echo $i >>${REPORT_FILE}
+            echo "" >>${REPORT_FILE}
+            cat $i >>${REPORT_FILE}
+        done
+    fi
+fi
+
+if [ "${ERROR_MSG}" = "" ]; then
     echo "" >>${REPORT_FILE}
     echo "*** ls -lahR ${LOCAL_BACKUP_DIR}/*" >>${REPORT_FILE}
     echo "" >>${REPORT_FILE}
